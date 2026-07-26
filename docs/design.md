@@ -105,7 +105,7 @@ J-agent owns:
 - ordered provider-neutral `Message`, `Content`, and `ToolCall` values;
 - the `Model` variation axis and typed streaming deltas;
 - the `Tool` variation axis and tool-call/result correlation;
-- bounded model/tool execution and cancellation;
+- context-governed model/tool execution and cancellation;
 - ordered synchronous lifecycle events;
 - one serialized conversation per `Agent`;
 - defensive transcript snapshots and validated construction-time restoration.
