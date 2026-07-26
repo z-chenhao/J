@@ -65,6 +65,10 @@ The editor uses:
 - `Esc` to cancel the active run;
 - `Ctrl+C` to exit.
 
+Mouse reporting is intentionally disabled so the terminal retains native text
+selection and copy. Transcript scrolling stays available through `PageUp`,
+`PageDown`, `Home`, and `End`.
+
 Reasoning deltas update the visible run state but their private content is not
 rendered. The transcript shows only a `Thinking…` presence marker. Assistant
 text streams through a terminal Markdown renderer. Tool cards retain complete

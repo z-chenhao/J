@@ -157,7 +157,11 @@ func TestCancellationDoesNotRenderProviderFailure(t *testing.T) {
 func TestViewIncludesModelAndControls(t *testing.T) {
 	model := New(context.Background(), nil, "ollama", "qwen", "")
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	view := updated.(Model).View().Content
+	rendered := updated.(Model).View()
+	if rendered.MouseMode != tea.MouseModeNone {
+		t.Fatalf("mouse mode=%v, want terminal-native selection", rendered.MouseMode)
+	}
+	view := rendered.Content
 	for _, text := range []string{"ollama/qwen", "enter send", "ctrl+j newline", "ctrl+o tools", "╭"} {
 		if !strings.Contains(view, text) {
 			t.Fatalf("view does not contain %q:\n%s", text, view)

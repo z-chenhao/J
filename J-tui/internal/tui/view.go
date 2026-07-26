@@ -90,7 +90,9 @@ func (m Model) View() tea.View {
 		lipgloss.NewStyle().Padding(0, 2).Render(footer),
 	))
 	view.AltScreen = true
-	view.MouseMode = tea.MouseModeCellMotion
+	// Preserve the terminal's native drag selection and copy behavior. Transcript
+	// scrolling remains keyboard-owned through PageUp, PageDown, Home, and End.
+	view.MouseMode = tea.MouseModeNone
 	return view
 }
 

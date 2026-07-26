@@ -100,7 +100,6 @@ func New(ctx context.Context, runner runner, provider, model, initialPrompt stri
 	input.Focus()
 
 	view := viewport.New(viewport.WithWidth(80), viewport.WithHeight(16))
-	view.MouseWheelEnabled = true
 
 	progress := spinner.New()
 	progress.Spinner = spinner.Dot
@@ -199,12 +198,6 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m.submit(string(msg))
 		}
 		return m, nil
-
-	case tea.MouseMsg:
-		var cmd tea.Cmd
-		m.viewport, cmd = m.viewport.Update(msg)
-		m.followOutput = m.viewport.AtBottom()
-		return m, cmd
 
 	case spinner.TickMsg:
 		if !m.running {

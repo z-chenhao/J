@@ -10,7 +10,7 @@ require (
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.5
 	github.com/charmbracelet/x/ansi v0.11.7
-	github.com/z-chenhao/J/J-agent v0.0.0-20260726154545-75976e57869c
+	github.com/z-chenhao/J/J-agent v0.0.0-20260726232751-e7536ce75144
 )
 
 require (

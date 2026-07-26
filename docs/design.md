@@ -227,9 +227,11 @@ The current terminal policy follows Bubble Tea v2's event-loop-owned background
 query, maps the observed result to one of two private palettes, and uses
 Bubbles v2's one-to-five-line dynamic editor. Lip Gloss and Glamour remain pure
 renderers and do not compete with Bubble Tea for terminal input, so OSC
-background replies cannot become user text. This validated variation axis does
-not justify a general theme contract, and no terminal detail enters J-agent.
-J-tui follows the repository-wide Go 1.26 baseline.
+background replies cannot become user text. Mouse reporting remains disabled so
+the host terminal owns native selection and copy; keyboard navigation owns
+transcript scrolling. This validated variation axis does not justify a general
+theme or mouse contract, and no terminal detail enters J-agent. J-tui follows
+the repository-wide Go 1.26 baseline.
 
 The implementation proved that text streaming, reasoning observation,
 tool start/completion, model observations, failure, and cancellation can be
