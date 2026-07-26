@@ -84,7 +84,7 @@ The `tool/bash` package is an ordinary implementation of `agent.Tool`. It fixes
 its working directory at construction time, validates arguments, combines
 stdout and stderr, removes terminal control characters, limits model-visible
 output to the last 2000 lines or 50KB, and kills the command process group on
-timeout or context cancellation.
+timeout or context cancellation on the supported Linux and macOS targets.
 
 The reference `j-agent` command enables this tool in its current working
 directory. In the repository image that directory is `/workspace`, so the

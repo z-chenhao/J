@@ -1,0 +1,511 @@
+// Package tui implements the terminal-specific consumer of J-agent events.
+package tui
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"github.com/z-chenhao/J/J-agent/agent"
+)
+
+const maxInputHeight = 5
+
+type runner interface {
+	Run(context.Context, string, agent.EventHandler) (agent.RunResult, error)
+}
+
+type itemKind uint8
+
+const (
+	itemUser itemKind = iota
+	itemAssistant
+	itemTool
+	itemError
+)
+
+type transcriptItem struct {
+	kind          itemKind
+	label         string
+	text          string
+	status        string
+	id            string
+	reasoning     bool
+	toolName      string
+	toolArguments string
+	toolOutput    string
+	toolError     string
+	rendered      string
+	renderWidth   int
+}
+
+type eventMsg struct {
+	event agent.Event
+}
+
+type runDoneMsg struct {
+	err error
+}
+
+// Model is one full-screen J-agent conversation.
+type Model struct {
+	ctx      context.Context
+	runner   runner
+	provider string
+	model    string
+
+	input    textarea.Model
+	viewport viewport.Model
+	spinner  spinner.Model
+	width    int
+	height   int
+
+	items          []transcriptItem
+	activeMessage  int
+	activeTools    map[string]int
+	reasoningBytes int
+	status         string
+	lastModel      *agent.ModelObservation
+	running        bool
+	cancel         context.CancelFunc
+	events         chan tea.Msg
+	initialPrompt  string
+	followOutput   bool
+	toolsExpanded  bool
+	isDark         bool
+	styles         styles
+}
+
+// New constructs a TUI that renders one runner conversation.
+func New(ctx context.Context, runner runner, provider, model, initialPrompt string) Model {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	const defaultDarkBackground = true
+	input := textarea.New()
+	input.Placeholder = "Ask J anything"
+	input.Prompt = "› "
+	input.CharLimit = 32 * 1024
+	input.DynamicHeight = true
+	input.MinHeight = 1
+	input.MaxHeight = maxInputHeight
+	input.SetStyles(textarea.DefaultStyles(defaultDarkBackground))
+	input.ShowLineNumbers = false
+	input.Focus()
+
+	view := viewport.New(viewport.WithWidth(80), viewport.WithHeight(16))
+	view.MouseWheelEnabled = true
+
+	progress := spinner.New()
+	progress.Spinner = spinner.Dot
+	styleSet := newStyles(defaultDarkBackground)
+	progress.Style = styleSet.accent
+
+	result := Model{
+		ctx:           ctx,
+		runner:        runner,
+		provider:      provider,
+		model:         model,
+		input:         input,
+		viewport:      view,
+		spinner:       progress,
+		width:         80,
+		height:        24,
+		activeMessage: -1,
+		activeTools:   make(map[string]int),
+		status:        "ready",
+		initialPrompt: strings.TrimSpace(initialPrompt),
+		followOutput:  true,
+		isDark:        defaultDarkBackground,
+		styles:        styleSet,
+	}
+	result.resize()
+	result.syncViewport()
+	return result
+}
+
+// Init starts cursor blinking and optionally submits the initial prompt.
+func (m Model) Init() tea.Cmd {
+	if m.initialPrompt != "" {
+		return tea.Batch(tea.RequestBackgroundColor, textarea.Blink, func() tea.Msg {
+			return submitMsg(m.initialPrompt)
+		})
+	}
+	return tea.Batch(tea.RequestBackgroundColor, textarea.Blink)
+}
+
+type submitMsg string
+
+// Update applies keyboard, window, and J-agent lifecycle events.
+func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := message.(type) {
+	case tea.BackgroundColorMsg:
+		m.applyBackground(msg.IsDark())
+		m.syncViewport()
+		return m, nil
+
+	case tea.WindowSizeMsg:
+		m.width = max(msg.Width, 24)
+		m.height = max(msg.Height, 10)
+		m.resize()
+		m.syncViewport()
+		return m, nil
+
+	case tea.KeyPressMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			if m.cancel != nil {
+				m.cancel()
+			}
+			return m, tea.Quit
+		case "esc":
+			if m.running && m.cancel != nil {
+				m.status = "canceling"
+				m.cancel()
+			}
+			return m, nil
+		case "ctrl+o":
+			m.toolsExpanded = !m.toolsExpanded
+			m.syncViewport()
+			return m, nil
+		case "pgup", "pgdown", "home":
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			m.followOutput = m.viewport.AtBottom()
+			return m, cmd
+		case "end":
+			m.viewport.GotoBottom()
+			m.followOutput = true
+			return m, nil
+		case "enter":
+			if m.running {
+				return m, nil
+			}
+			prompt := strings.TrimSpace(m.input.Value())
+			if prompt == "" {
+				return m, nil
+			}
+			return m.submit(prompt)
+		}
+
+	case submitMsg:
+		if !m.running && strings.TrimSpace(string(msg)) != "" {
+			return m.submit(string(msg))
+		}
+		return m, nil
+
+	case tea.MouseMsg:
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		m.followOutput = m.viewport.AtBottom()
+		return m, cmd
+
+	case spinner.TickMsg:
+		if !m.running {
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
+	case eventMsg:
+		m.applyEvent(msg.event)
+		m.syncViewport()
+		return m, waitForEvent(m.events)
+
+	case runDoneMsg:
+		m.running = false
+		m.cancel = nil
+		m.events = nil
+		if errors.Is(msg.err, context.Canceled) {
+			m.status = "canceled"
+		} else if msg.err != nil {
+			m.status = "failed"
+			if !m.hasTerminalError(msg.err.Error()) {
+				m.items = append(m.items, transcriptItem{
+					kind: itemError, label: "error", text: msg.err.Error(),
+				})
+			}
+		} else {
+			m.status = "ready"
+		}
+		m.activeMessage = -1
+		m.syncViewport()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	previousHeight := m.input.Height()
+	m.input, cmd = m.input.Update(message)
+	m.resize()
+	if m.input.Height() != previousHeight {
+		m.syncViewport()
+	}
+	return m, cmd
+}
+
+func (m Model) submit(prompt string) (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithCancel(m.ctx)
+	m.cancel = cancel
+	m.running = true
+	m.status = "starting"
+	m.lastModel = nil
+	m.reasoningBytes = 0
+	m.activeMessage = -1
+	m.activeTools = make(map[string]int)
+	m.followOutput = true
+	m.input.Reset()
+	m.resize()
+	m.items = append(m.items, transcriptItem{
+		kind: itemUser, label: "you", text: strings.TrimSpace(prompt),
+	})
+	m.events = make(chan tea.Msg, 256)
+	m.syncViewport()
+	return m, tea.Batch(startRun(ctx, m.runner, prompt, m.events), m.spinner.Tick)
+}
+
+func startRun(ctx context.Context, runner runner, prompt string, events chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		go func() {
+			_, err := runner.Run(ctx, prompt, func(event agent.Event) {
+				select {
+				case events <- eventMsg{event: event}:
+				case <-ctx.Done():
+				}
+			})
+			select {
+			case events <- runDoneMsg{err: err}:
+			case <-ctx.Done():
+				events <- runDoneMsg{err: err}
+			}
+		}()
+		return <-events
+	}
+}
+
+func waitForEvent(events <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg {
+		return <-events
+	}
+}
+
+func (m *Model) applyEvent(event agent.Event) {
+	switch event.Type {
+	case agent.EventAgentStarted:
+		m.status = "running"
+	case agent.EventTurnStarted:
+		m.status = "thinking"
+	case agent.EventMessageStarted:
+		m.status = "streaming"
+		m.items = append(m.items, transcriptItem{
+			kind: itemAssistant, label: "j", status: "streaming",
+		})
+		m.activeMessage = len(m.items) - 1
+	case agent.EventMessageDelta:
+		if event.Delta == nil {
+			return
+		}
+		switch event.Delta.Type {
+		case agent.DeltaText:
+			m.status = "responding"
+			if m.activeMessage >= 0 {
+				m.items[m.activeMessage].text += event.Delta.Delta
+				m.items[m.activeMessage].renderWidth = 0
+			}
+		case agent.DeltaReasoning:
+			m.status = "thinking"
+			m.reasoningBytes += len(event.Delta.Delta)
+			if m.activeMessage >= 0 {
+				m.items[m.activeMessage].reasoning = true
+			}
+		case agent.DeltaToolCall:
+			m.status = "preparing tool"
+		}
+	case agent.EventMessageCompleted:
+		if m.activeMessage >= 0 {
+			if event.Message != nil && m.items[m.activeMessage].text == "" {
+				m.items[m.activeMessage].text = event.Message.Text()
+				m.items[m.activeMessage].renderWidth = 0
+			}
+			m.items[m.activeMessage].status = ""
+			if m.items[m.activeMessage].text == "" && !m.items[m.activeMessage].reasoning {
+				m.items = append(m.items[:m.activeMessage], m.items[m.activeMessage+1:]...)
+			}
+		}
+		m.activeMessage = -1
+		m.status = "running"
+	case agent.EventMessageFailed:
+		if m.status == "canceling" {
+			if m.activeMessage >= 0 {
+				m.items[m.activeMessage].status = "canceled"
+				m.activeMessage = -1
+			}
+			return
+		}
+		m.finishMessageWithError(event.Error)
+	case agent.EventToolStarted:
+		if event.ToolCall == nil {
+			return
+		}
+		item := transcriptItem{
+			kind:          itemTool,
+			label:         "tool",
+			status:        "running",
+			id:            event.ToolCall.ID,
+			toolName:      event.ToolCall.Name,
+			toolArguments: string(event.ToolCall.Arguments),
+		}
+		m.items = append(m.items, item)
+		m.activeTools[event.ToolCall.ID] = len(m.items) - 1
+		m.status = "tool " + event.ToolCall.Name
+	case agent.EventToolCompleted:
+		m.finishTool(event)
+	case agent.EventTurnCompleted:
+		if event.Model != nil {
+			observation := *event.Model
+			m.lastModel = &observation
+		}
+		m.status = "running"
+	case agent.EventTurnFailed:
+		if m.status != "canceling" {
+			m.status = "failed"
+		}
+	case agent.EventAgentCompleted:
+		m.status = "completed"
+	case agent.EventAgentFailed:
+		if m.status == "canceling" {
+			return
+		}
+		m.status = "failed"
+		if event.Error != "" && !m.hasTerminalError(event.Error) {
+			m.items = append(m.items, transcriptItem{
+				kind: itemError, label: "error", text: event.Error,
+			})
+		}
+	}
+}
+
+func (m *Model) finishMessageWithError(message string) {
+	if m.activeMessage >= 0 {
+		m.items[m.activeMessage].status = "failed"
+		if m.items[m.activeMessage].text == "" {
+			m.items[m.activeMessage].text = message
+		}
+		m.activeMessage = -1
+	}
+	m.status = "failed"
+}
+
+func (m *Model) finishTool(event agent.Event) {
+	if event.ToolCall == nil {
+		return
+	}
+	index, ok := m.activeTools[event.ToolCall.ID]
+	if !ok {
+		m.items = append(m.items, transcriptItem{
+			kind:          itemTool,
+			label:         "tool",
+			id:            event.ToolCall.ID,
+			toolName:      event.ToolCall.Name,
+			toolArguments: string(event.ToolCall.Arguments),
+		})
+		index = len(m.items) - 1
+	}
+	if event.IsError {
+		m.items[index].status = "failed"
+		m.items[index].toolError = event.Error
+		m.items[index].toolOutput = event.Output
+	} else {
+		m.items[index].status = formatDuration(event.Duration)
+		m.items[index].toolOutput = event.Output
+	}
+	delete(m.activeTools, event.ToolCall.ID)
+	m.status = "running"
+}
+
+func (m Model) hasTerminalError(message string) bool {
+	for index := len(m.items) - 1; index >= 0; index-- {
+		if m.items[index].kind == itemError && m.items[index].text == message {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) resize() {
+	contentWidth := max(m.width-4, 20)
+	m.input.SetWidth(max(contentWidth-4, 12))
+	viewportHeight := max(m.height-m.input.Height()-6, 1)
+	m.viewport.SetWidth(contentWidth)
+	m.viewport.SetHeight(viewportHeight)
+}
+
+func (m *Model) syncViewport() {
+	offset := m.viewport.YOffset()
+	wasAtBottom := m.viewport.AtBottom()
+	m.ensureRendered()
+	m.viewport.SetContent(m.renderTranscript())
+	if m.followOutput || wasAtBottom {
+		m.viewport.GotoBottom()
+		m.followOutput = true
+		return
+	}
+	m.viewport.SetYOffset(offset)
+}
+
+func (m *Model) ensureRendered() {
+	for index := range m.items {
+		item := &m.items[index]
+		if item.kind != itemUser && item.kind != itemAssistant {
+			continue
+		}
+		width := max(m.viewport.Width()-2, 20)
+		if item.kind == itemUser {
+			width = max(m.viewport.Width()-6, 20)
+		}
+		if item.renderWidth == width && (item.rendered != "" || item.text == "") {
+			continue
+		}
+		item.rendered = m.renderMarkdown(item.text, width)
+		item.renderWidth = width
+	}
+}
+
+func (m *Model) applyBackground(isDark bool) {
+	if m.isDark == isDark {
+		return
+	}
+	m.isDark = isDark
+	m.styles = newStyles(isDark)
+	m.spinner.Style = m.styles.accent
+	m.input.SetStyles(textarea.DefaultStyles(isDark))
+	for index := range m.items {
+		m.items[index].rendered = ""
+		m.items[index].renderWidth = 0
+	}
+}
+
+func compact(value string, limit int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	runes := []rune(value)
+	if len(runes) <= limit {
+		return value
+	}
+	return string(runes[:limit-1]) + "…"
+}
+
+func formatDuration(duration time.Duration) string {
+	if duration <= 0 {
+		return "done"
+	}
+	if duration < time.Second {
+		return fmt.Sprintf("%dms", duration.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", duration.Seconds())
+}

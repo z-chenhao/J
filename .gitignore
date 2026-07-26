@@ -1,4 +1,5 @@
 /J-agent/bin/
+/J-tui/bin/
 .DS_Store
 .vscode/
 .idea/

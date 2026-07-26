@@ -15,10 +15,11 @@ J is the umbrella repository. J-agent is its independently embeddable runtime
 kernel. J-tui and J-mem are first-party consumers used to prove that the public
 seams are sufficient for real customization.
 
-Current verified consumers of J-agent are its reference CLI and private JSONL
-runtime. DeepSeek and Ollama independently exercise the model seam. J-tui and
-J-mem are now explicit project boundaries, but do not yet count as validating
-implementations.
+Current verified consumers of J-agent are its reference CLI, private JSONL
+runtime, and J-tui. DeepSeek and Ollama independently exercise the model seam.
+J-tui consumes the public event and cancellation seams without a runtime API
+change. J-mem is an explicit project boundary but does not yet count as a
+validating implementation.
 
 ## 2. Engineering constitution
 
@@ -57,13 +58,22 @@ registered tool. These precedents support opening transcript, model, tool, and
 event mechanisms without moving memory, subagent, MCP, or plugin products into
 J-agent.
 
+Pi's `--mode json` also demonstrates that a UI can expose its event input as a
+JSON Lines diagnostic stream. J-tui adopts only that narrow mechanism:
+`j-tui --mode json` projects J-agent's existing events and does not claim Pi
+protocol compatibility. Pi's queue, compaction, retry, extension, and session
+events remain product policy outside J-agent.
+
 Primary sources:
 
-- [Pi agent core](https://github.com/earendil-works/pi/tree/main/packages/agent)
-- [Pi extension system](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md)
-- [Pi SDK and ResourceLoader](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md)
-- [Pi package format](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md)
-- [Pi subagent example](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/examples/extensions/subagent/index.ts)
+- [Pi agent core](https://github.com/badlogic/pi-mono/tree/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/agent)
+- [Pi Bash Tool](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/agent/src/harness/tools/bash.ts)
+- [Pi shell execution](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/agent/src/harness/env/nodejs.ts)
+- [Pi extension system](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/docs/extensions.md)
+- [Pi SDK and ResourceLoader](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/docs/sdk.md)
+- [Pi package format](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/docs/packages.md)
+- [Pi JSON event stream mode](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/docs/json.md)
+- [Pi subagent example](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/examples/extensions/subagent/index.ts)
 
 The conclusion is not that J should copy Pi's entire mutable state or
 ExtensionAPI. Pi is a mature coding product; J-agent is intentionally only a
@@ -125,20 +135,107 @@ J-agent does not own:
 - gateway transports or per-chat routing;
 - retry, compaction, model fleets, or provider selection policy.
 
-## 6. First-party consumers
+## 6. First-party Bash and container boundary
+
+### Concrete requirement and consumers
+
+The reference `j-agent` command and J-tui both need to inspect and modify the
+workspace in which the agent is running. A model/tool loop with no supplied
+tools truthfully reports that it cannot act. These two real consumers justify
+one first-party Bash implementation; they do not justify a terminal framework.
+
+The supported deployment premise is that a reference agent runs inside a
+container. The repository Docker image makes that premise executable by fixing
+the command working directory at `/workspace` and running as an unprivileged
+user. A direct host invocation remains available for development, but it grants
+Bash the host permissions of that process and is not an isolation boundary.
+
+### Invariant mechanism and operator policy
+
+The experimental `J-agent/tool/bash` package implements the existing
+`agent.Tool` contract. Its domain-required behavior is:
+
+- one construction-time working directory and resolved Bash executable;
+- strict JSON arguments containing a command and optional timeout;
+- combined stdout/stderr capture in observed write order;
+- removal of terminal control characters before model or TUI display;
+- bounded tail output of at most 2000 lines or 50KB;
+- process-group termination on timeout or context cancellation on the
+  supported Linux and macOS targets;
+- model-visible command failure and partial output.
+
+The container operator owns mounts, credentials, environment, network, Linux
+capabilities, resource limits, image provenance, and disposal. Those are real
+security semantics but are not agent runtime semantics.
+
+### Openness and stability
+
+`tool/bash.New` is experimental public composition. The reference commands
+select it explicitly through `WithTools`; importing package `agent` alone
+grants no process capability. The implementation opens a concrete reusable
+Tool, while its buffers and process machinery remain private.
+
+The following are deliberately not exposed or generalized:
+
+- `Terminal`, `Executor`, `Sandbox`, `Approval`, or command-policy interfaces;
+- PTY or interactive terminal sessions;
+- runtime tool discovery or mutation;
+- a provider-specific shell prompt;
+- automatic persistence of complete command output.
+
+The last choice differs intentionally from Pi. Persisting every truncated
+command result would add a secret-bearing storage lifecycle; J currently keeps
+bounded tail output and lets the model issue a narrower follow-up command.
+
+Rejected alternatives:
+
+- A shell branch inside the agent loop would privilege one Tool and couple
+  process policy to transcript invariants.
+- Auto-discovering tools would make capabilities ambient and harder to audit.
+- A generic execution environment would predict unverified backends before a
+  second implementation exists.
+- Prompt-only authorization would describe a policy without enforcing it.
+
+## 7. First-party consumers
 
 ### J-tui
 
 J-tui is a minimal terminal UI. It calls J-agent, consumes lifecycle events,
 reads transcript snapshots, and cancels runs through `context.Context`.
+Its command may explicitly compose an existing Ollama or DeepSeek adapter; it
+does not own dynamic model routing or provider discovery.
+
+DeepSeek context caching requires no new runtime mechanism: the service enables
+it automatically, and J-agent's ordered transcript makes each new turn an
+extension of the prior request prefix. Provider-reported cached input tokens
+remain ordinary `Usage`; J-tui may derive and display cache misses from total
+input minus cached input. Cache policy and storage remain provider-owned.
 
 It owns rendering, key bindings, terminal state, input editing, and UI-specific
 metadata. J-agent must not gain labels, colors, widgets, or TUI component types
 to serve J-tui.
 
-The first implementation should use existing start/delta/completed events.
-Tool-progress events should be proposed only if an actual interaction cannot be
-represented truthfully with the current event stream.
+The first implementation uses existing start/delta/completed events. Its
+private reducer maps them to `thinking`, `responding`, `tool`, `completed`,
+`failed`, and `canceled` display states. Reasoning content is retained by the
+runtime but only its presence is displayed. J-tui privately owns Markdown
+rendering, tool-card expansion, run-state colors, and whether a manually
+scrolled viewport follows new output. `--mode json` exposes an experimental
+JSON projection of the same event input for event-order diagnostics.
+
+The current terminal policy follows Bubble Tea v2's event-loop-owned background
+query, maps the observed result to one of two private palettes, and uses
+Bubbles v2's one-to-five-line dynamic editor. Lip Gloss and Glamour remain pure
+renderers and do not compete with Bubble Tea for terminal input, so OSC
+background replies cannot become user text. This validated variation axis does
+not justify a general theme contract, and no terminal detail enters J-agent.
+J-tui follows the repository-wide Go 1.26 baseline.
+
+The implementation proved that text streaming, reasoning observation,
+tool start/completion, model observations, failure, and cancellation can be
+represented without a new J-agent API. Tool-progress events should be proposed
+only if a future real tool cannot be represented truthfully with the current
+start/completed lifecycle.
 
 ### J-mem
 
@@ -156,7 +253,7 @@ Ambient retrieval or context injection should wait until the tool-based design
 proves insufficient. If required, a model wrapper should be tried before
 adding a runtime Hook.
 
-## 7. Planned external modules
+## 8. Planned external modules
 
 These names describe product modules, not promised J-agent interfaces:
 
@@ -173,7 +270,7 @@ extension loading. J-plugins must first validate whether compile-time Go
 composition, external processes, or resource-only packages solve the real use
 case.
 
-## 8. Deliberately not generalized
+## 9. Deliberately not generalized
 
 Do not add these to J-agent without a failing real integration:
 
@@ -196,9 +293,12 @@ Potential future mechanisms must be validated in this order:
 5. Stabilize only after another independent consumer validates the same
    semantics.
 
-## 9. Decisions retained
+## 10. Decisions retained
 
 - J is the Git and GitHub repository root.
+- J uses Go 1.26 across its modules and workspace. CI follows the latest
+  `1.26.x` patch, repository development selects at least Go 1.26.5, and J does
+  not maintain an older-version matrix without a real consumer.
 - J-agent remains a separate Go module under `J/J-agent`.
 - DeepSeek and Ollama are real adapters; demo models are not product features.
 - J-Space research informs model/Harness choices but is not a runtime
@@ -208,12 +308,14 @@ Potential future mechanisms must be validated in this order:
   semantics.
 - Tool authorization belongs to embedders or tool wrappers, not prompt-only
   policy.
+- Reference commands compose the first-party Bash Tool; the container, not the
+  agent loop, owns execution isolation.
 - Public APIs remain experimental before independent production consumers.
 
-## 10. Minimal development order
+## 11. Minimal development order
 
 1. Keep J-agent passing its protocol and race tests.
-2. Build a text-only J-tui against current events.
+2. Keep the text-only J-tui and JSON event trace passing against current events.
 3. Build J-mem SQLite transcript round-trip using `History` and `WithHistory`.
 4. Add the four JSONL-backed long-term memory tools.
 5. Re-audit actual integration friction before changing J-agent.

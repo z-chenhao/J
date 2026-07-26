@@ -19,7 +19,8 @@ Hook.
 
 Requirements:
 
-- Go 1.23 or newer
+- Go 1.26 or newer; repository development selects the patched Go 1.26.5
+  toolchain or a newer compatible release
 
 Run all implemented checks from the repository root:
 

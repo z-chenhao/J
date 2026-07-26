@@ -1,0 +1,10 @@
+.git
+.github
+.DS_Store
+.env
+**/bin
+**/*.log
+**/*.pt
+**/*.safetensors
+J-agent/research/jspace/artifacts
+J-agent/research/jspace/results

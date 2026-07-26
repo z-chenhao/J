@@ -8,7 +8,7 @@ The repository currently contains:
 | Project | Responsibility | Status |
 | --- | --- | --- |
 | [`J-agent`](J-agent/) | Minimal Go model/tool runtime | Implemented, experimental |
-| [`J-tui`](J-tui/) | Minimal terminal interface built on J-agent events | Boundary defined |
+| [`J-tui`](J-tui/) | Minimal terminal interface and JSON event trace | Implemented, experimental |
 | [`J-mem`](J-mem/) | Local short- and long-term memory for J-agent | Boundary defined |
 
 J-agent remains independently embeddable. J-tui and J-mem are first-party
@@ -33,11 +33,44 @@ Run all currently implemented checks from the repository root:
 make check
 ```
 
-Build the reference agent binary:
+Build the reference agent and terminal binaries:
 
 ```bash
 make build
 ```
+
+## Run in a container
+
+The reference commands include the first-party `bash` tool. The supported
+isolation boundary is the container, not J-agent's model/tool loop:
+
+```bash
+docker build -t j:dev .
+
+docker run --rm -i \
+  -e DEEPSEEK_API_KEY \
+  -v "$PWD:/workspace" \
+  j:dev \
+  --provider deepseek \
+  --model deepseek-v4-flash \
+  "Use bash to print the working directory."
+```
+
+Run the same composition through the TUI by overriding the image entrypoint:
+
+```bash
+docker run --rm -it \
+  -e DEEPSEEK_API_KEY \
+  -v "$PWD:/workspace" \
+  --entrypoint j-tui \
+  j:dev \
+  --provider deepseek \
+  --model deepseek-v4-flash
+```
+
+The mounted `/workspace`, environment variables, network, resource limits, and
+container privileges are operator policy. Running either reference command
+directly on a host gives Bash the same host permissions as that process.
 
 ## Principles
 
