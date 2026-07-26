@@ -14,6 +14,7 @@ import (
 	"github.com/z-chenhao/J/J-agent/adapter/ollama"
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/internal/runtime"
+	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
 )
 
 type config struct {
@@ -48,7 +49,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
-	runner, err := agent.New(model)
+	shell, err := bashtool.New(".")
+	if err != nil {
+		return err
+	}
+	runner, err := agent.New(model, agent.WithTools(shell))
 	if err != nil {
 		return err
 	}

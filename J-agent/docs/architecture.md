@@ -16,6 +16,7 @@ Current in-repository consumers are:
 
 - the reference `cmd/j-agent` CLI
 - the private JSONL queue used by the reference process
+- J-tui's interactive and JSON event modes
 
 The DeepSeek and Ollama adapters independently validate the model seam.
 Applications embedding the Go `agent` package are the intended external
@@ -68,6 +69,10 @@ read `History`, but must not reenter `Run` or `Reset` on the same `Agent`.
 The DeepSeek and Ollama adapters validate the model seam. The JSONL process is
 a reference transport, not mandatory framework semantics.
 
+The first-party `tool/bash` package is replaceable policy implemented through
+the existing `Tool` seam. The reference commands opt into it; the `agent`
+package does not discover or grant process capabilities.
+
 ## Openness decision
 
 ### Experimental public contract
@@ -83,6 +88,11 @@ shapes, tool-call/result correlation, and completion of tool batches before
 accepting restored state. It deliberately does not define a storage interface,
 session identifier, persistence format, retention policy, or runtime message
 mutation API.
+
+`tool/bash.New` is an experimental first-party Tool constructor. It exposes one
+fixed-workspace Bash capability because the reference commands and J-tui are
+real consumers. Its output and cancellation invariants are public behavior;
+its buffering and process implementation remain private.
 
 Evolution strategy:
 
@@ -117,6 +127,7 @@ J-agent does not define universal interfaces for:
 - multiple agent protocols
 - J-space activations or interpretability signals
 - arbitrary event metadata
+- terminals, executors, approvals, or sandboxes
 
 These capabilities should be composed outside the core until multiple real
 implementations reveal a stable mechanism.

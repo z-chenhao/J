@@ -27,6 +27,11 @@ The response is emitted before task events:
 }
 ```
 
+The reference process currently advertises the first-party `bash` Tool to the
+selected model. Tool availability is command composition, not a protocol
+feature; another embedder may expose a different set while emitting the same
+event contract.
+
 ### Cancel
 
 ```json

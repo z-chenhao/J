@@ -35,11 +35,12 @@ The core does not provide:
 - model fleets or automatic provider selection
 - memory or session persistence
 - compaction and retry policy
-- a built-in shell tool
+- a privileged terminal abstraction or sandbox
 
 ## Requirements
 
-- Go 1.23 or newer
+- Go 1.26 or newer; repository development selects Go 1.26.5 or a newer
+  compatible toolchain
 
 ## Use Ollama
 
@@ -76,6 +77,34 @@ Provider, model, base URL, and thinking mode may also be supplied through
 `J_AGENT_THINKING`. DeepSeek reasoning
 effort is available as `--reasoning-effort high|max` or
 `J_AGENT_REASONING_EFFORT`.
+
+## First-party Bash tool
+
+The `tool/bash` package is an ordinary implementation of `agent.Tool`. It fixes
+its working directory at construction time, validates arguments, combines
+stdout and stderr, removes terminal control characters, limits model-visible
+output to the last 2000 lines or 50KB, and kills the command process group on
+timeout or context cancellation.
+
+The reference `j-agent` command enables this tool in its current working
+directory. In the repository image that directory is `/workspace`, so the
+container owns filesystem, credential, network, and resource isolation:
+
+```bash
+docker build -t j:dev ..
+docker run --rm -i \
+  -v "$PWD:/workspace" \
+  j:dev \
+  --provider ollama \
+  --base-url http://host.docker.internal:11434 \
+  --model qwen3 \
+  "Use bash to run pwd."
+```
+
+An embedding application still chooses its complete tool set through
+`agent.WithTools`; importing `agent` alone grants no process capability. The
+Bash package does not define a generic terminal, executor, approval, or sandbox
+interface.
 
 ## Embed J-agent
 
@@ -170,15 +199,18 @@ adapter/ollama/     Ollama native protocol adapter
 agent/              experimental embeddable Go runtime
 cmd/j-agent/        reference CLI and JSONL process
 internal/runtime/   private queue and JSONL transport
+tool/bash/          experimental first-party Bash Tool
 docs/               architecture and protocol contracts
 research/           external model and harness research
 ```
 
 ## Security
 
-J-agent executes only tools explicitly supplied by the embedding application. The
-core does not ship an unrestricted shell tool. Tool implementers remain
-responsible for authorization, sandboxing, input validation, and output limits.
+The `agent` package executes only tools explicitly supplied by the embedding
+application. The reference command deliberately supplies `tool/bash`; it runs
+with the permissions of the containing process. Use the repository container
+or an equivalent isolation boundary, expose only the intended workspace and
+credentials, and set network and resource policy outside J-agent.
 
 Please report vulnerabilities as described in
 [the repository security policy](../SECURITY.md).
