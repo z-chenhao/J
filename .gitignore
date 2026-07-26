@@ -1,0 +1,10 @@
+/bin/
+.DS_Store
+.vscode/
+.idea/
+*.log
+.env
+*.pt
+*.safetensors
+research/jspace/artifacts/
+research/jspace/results/
