@@ -17,8 +17,15 @@ type fixedModel struct {
 	content string
 }
 
-func (m fixedModel) Complete(_ context.Context, _ agent.ModelRequest) (agent.Message, error) {
-	return agent.Message{Role: agent.RoleAssistant, Content: m.content}, nil
+func (m fixedModel) Complete(
+	_ context.Context,
+	_ agent.ModelRequest,
+	emit func(agent.ModelDelta),
+) (agent.ModelResponse, error) {
+	if emit != nil {
+		emit(agent.ModelDelta{Type: agent.DeltaText, Index: 0, Delta: m.content})
+	}
+	return testResponse(m.content), nil
 }
 
 type gatedModel struct {
@@ -27,13 +34,31 @@ type gatedModel struct {
 	once    sync.Once
 }
 
-func (m *gatedModel) Complete(ctx context.Context, _ agent.ModelRequest) (agent.Message, error) {
+func (m *gatedModel) Complete(
+	ctx context.Context,
+	_ agent.ModelRequest,
+	_ func(agent.ModelDelta),
+) (agent.ModelResponse, error) {
 	m.once.Do(func() { close(m.started) })
 	select {
 	case <-ctx.Done():
-		return agent.Message{}, ctx.Err()
+		return agent.ModelResponse{}, ctx.Err()
 	case <-m.release:
-		return agent.Message{Role: agent.RoleAssistant, Content: "released"}, nil
+		return testResponse("released"), nil
+	}
+}
+
+func testResponse(content string) agent.ModelResponse {
+	return agent.ModelResponse{
+		Message:    agent.TextMessage(agent.RoleAssistant, content),
+		Provider:   "test",
+		Model:      "test-model",
+		StopReason: agent.StopReasonStop,
+		Usage: &agent.Usage{
+			InputTokens:  1,
+			OutputTokens: 1,
+			TotalTokens:  2,
+		},
 	}
 }
 
@@ -106,10 +131,10 @@ func TestRunLoopSubmitSettlesWithoutDeadlock(t *testing.T) {
 		if record["type"] == "task.completed" {
 			terminalCount++
 		}
-		if record["type"] == string(agent.EventMessageCreated) {
+		if record["type"] == string(agent.EventMessageStarted) {
 			id, _ := record["messageId"].(string)
 			if id == "" {
-				t.Fatal("message.created is missing messageId")
+				t.Fatal("message.started is missing messageId")
 			}
 			if messageIDs[id] {
 				t.Fatalf("duplicate messageId %q", id)
@@ -220,6 +245,22 @@ func TestHandleReadCommandsAndIdleReset(t *testing.T) {
 	}
 	if len(rt.runner.History()) != 0 {
 		t.Fatal("reset did not clear history")
+	}
+}
+
+func TestTaskSnapshotReportsRunDiagnostics(t *testing.T) {
+	var out bytes.Buffer
+	rt := newTestRuntime(t, fixedModel{content: "done"}, &out)
+	rt.Handle(command{ID: "1", Type: commandSubmit, Message: "hello"})
+	rt.Wait()
+
+	task, ok := rt.task("task-000001")
+	if !ok {
+		t.Fatal("task not found")
+	}
+	if task.StartedAt == "" || task.CompletedAt == "" || task.Turns == nil || *task.Turns != 1 ||
+		task.Usage == nil || task.Usage.TotalTokens != 2 || task.FirstDeltaMS == nil {
+		t.Fatalf("task diagnostics=%#v", task)
 	}
 }
 

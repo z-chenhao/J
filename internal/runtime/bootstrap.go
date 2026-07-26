@@ -3,42 +3,38 @@ package runtime
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 
 	"github.com/z-chenhao/J/agent"
-	"github.com/z-chenhao/J/internal/demo"
 )
 
-// RunCLI runs the deterministic reference CLI.
-func RunCLI(ctx context.Context, in io.Reader, out, errOut io.Writer, args ...string) error {
-	runner, err := agent.New(demo.Model{})
-	if err != nil {
-		return err
+// RunCLI runs the reference CLI around an injected agent.
+func RunCLI(
+	ctx context.Context,
+	runner *agent.Agent,
+	in io.Reader,
+	out, errOut io.Writer,
+	args ...string,
+) error {
+	if runner == nil {
+		return errors.New("runner is required")
 	}
 	if len(args) > 0 {
-		result, runErr := runner.Run(ctx, strings.Join(args, " "), nil)
+		_, runErr := runStreaming(ctx, runner, strings.Join(args, " "), out)
 		if runErr != nil {
-			if errOut != nil {
-				fmt.Fprintln(errOut, "error:", runErr)
-			}
 			return runErr
-		}
-		if out != nil {
-			fmt.Fprintln(out, result.Content)
 		}
 		return nil
 	}
 	return runInteractive(ctx, runner, in, out, errOut)
 }
 
-// RunRPC runs the experimental JSONL reference transport.
-func RunRPC(in io.Reader, out io.Writer) error {
-	runner, err := agent.New(demo.Model{})
-	if err != nil {
-		return err
-	}
+// RunRPC runs the experimental JSONL reference transport around an injected
+// agent.
+func RunRPC(runner *agent.Agent, in io.Reader, out io.Writer) error {
 	rt, err := New(runner, out)
 	if err != nil {
 		return err
@@ -68,19 +64,57 @@ func runInteractive(ctx context.Context, runner *agent.Agent, in io.Reader, out,
 			}
 			break
 		}
-		result, err := runner.Run(ctx, line, nil)
-		if err != nil {
+		if _, err := runStreaming(ctx, runner, line, out); err != nil {
 			if errOut != nil {
 				fmt.Fprintln(errOut, "error:", err)
 			}
-			continue
-		}
-		if out != nil {
-			fmt.Fprintln(out, result.Content)
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return fmt.Errorf("read input: %w", err)
 	}
 	return nil
+}
+
+func runStreaming(
+	ctx context.Context,
+	runner *agent.Agent,
+	input string,
+	out io.Writer,
+) (agent.RunResult, error) {
+	runContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var (
+		streamed bool
+		writeErr error
+	)
+	result, err := runner.Run(runContext, input, func(event agent.Event) {
+		if out == nil || writeErr != nil ||
+			event.Type != agent.EventMessageDelta || event.Delta == nil {
+			return
+		}
+		if event.Delta.Type == agent.DeltaText {
+			streamed = true
+			if _, writeErr = io.WriteString(out, event.Delta.Delta); writeErr != nil {
+				cancel()
+			}
+		}
+	})
+	if writeErr != nil {
+		return result, fmt.Errorf("write output: %w", writeErr)
+	}
+	if err != nil {
+		return result, err
+	}
+	if out != nil {
+		if !streamed {
+			if _, err := io.WriteString(out, result.Message.Text()); err != nil {
+				return result, fmt.Errorf("write output: %w", err)
+			}
+		}
+		if _, err := io.WriteString(out, "\n"); err != nil {
+			return result, fmt.Errorf("write output: %w", err)
+		}
+	}
+	return result, nil
 }

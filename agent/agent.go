@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 var (
@@ -112,10 +113,7 @@ func New(model Model, options ...Option) (*Agent, error) {
 			return nil, fmt.Errorf("tool %q has invalid input schema", spec.Name)
 		}
 		var schemaObject map[string]json.RawMessage
-		if err := json.Unmarshal(spec.InputSchema, &schemaObject); err != nil {
-			return nil, fmt.Errorf("tool %q input schema must be a JSON object", spec.Name)
-		}
-		if schemaObject == nil {
+		if err := json.Unmarshal(spec.InputSchema, &schemaObject); err != nil || schemaObject == nil {
 			return nil, fmt.Errorf("tool %q input schema must be a JSON object", spec.Name)
 		}
 		tools[spec.Name] = tool
@@ -133,13 +131,13 @@ func New(model Model, options ...Option) (*Agent, error) {
 
 // Run appends one user message and advances the conversation until the model
 // returns a final assistant message or the tool-round limit is reached.
-func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Message, error) {
+func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (RunResult, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return Message{}, ErrEmptyInput
+		return RunResult{}, ErrEmptyInput
 	}
 	if ctx == nil {
-		return Message{}, errors.New("context is required")
+		return RunResult{}, errors.New("context is required")
 	}
 
 	a.runMu.Lock()
@@ -147,92 +145,133 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Me
 
 	messages := a.History()
 	if len(messages) == 0 && a.systemPrompt != "" {
-		messages = append(messages, Message{Role: RoleSystem, Content: a.systemPrompt})
+		messages = append(messages, TextMessage(RoleSystem, a.systemPrompt))
 	}
-	messages = append(messages, Message{Role: RoleUser, Content: input})
+	messages = append(messages, TextMessage(RoleUser, input))
 	a.storeHistory(messages)
 	emit(handler, Event{Type: EventAgentStarted})
 
+	var result RunResult
 	for round := 0; round < a.maxToolRounds; round++ {
 		if err := ctx.Err(); err != nil {
 			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
-			return Message{}, err
+			return result, err
 		}
 
 		emit(handler, Event{Type: EventTurnStarted})
-		output, err := a.model.Complete(ctx, ModelRequest{
+		messageStarted := false
+		startMessage := func() {
+			if !messageStarted {
+				messageStarted = true
+				emit(handler, Event{Type: EventMessageStarted})
+			}
+		}
+		modelStarted := time.Now()
+		var firstDelta *time.Duration
+		response, err := a.model.Complete(ctx, ModelRequest{
 			Messages: cloneMessages(messages),
 			Tools:    cloneToolSpecs(a.toolSpecs),
+		}, func(delta ModelDelta) {
+			if firstDelta == nil {
+				duration := time.Since(modelStarted)
+				firstDelta = &duration
+			}
+			startMessage()
+			copied := cloneDelta(delta)
+			emit(handler, Event{Type: EventMessageDelta, Delta: &copied})
 		})
-		if err != nil {
-			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
-			return Message{}, err
+		modelDuration := time.Since(modelStarted)
+		result.ModelDuration += modelDuration
+		if result.FirstDelta == nil && firstDelta != nil {
+			result.FirstDelta = cloneDuration(firstDelta)
 		}
-		if output.Role != RoleAssistant {
-			err := fmt.Errorf("model returned role %q, want %q", output.Role, RoleAssistant)
+		if err != nil {
+			if messageStarted {
+				emit(handler, Event{Type: EventMessageFailed, Duration: modelDuration, Error: err.Error()})
+			}
+			emit(handler, Event{Type: EventTurnFailed, Duration: modelDuration, Error: err.Error()})
 			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
-			return Message{}, err
+			return result, err
+		}
+		startMessage()
+		addUsage(&result.Usage, response.Usage)
+
+		output := cloneMessage(response.Message)
+		if err := validateModelResponse(response, output); err != nil {
+			emit(handler, Event{Type: EventMessageFailed, Duration: modelDuration, Error: err.Error()})
+			emit(handler, Event{Type: EventTurnFailed, Duration: modelDuration, Error: err.Error()})
+			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
+			return result, err
+		}
+		calls := output.ToolCalls()
+		if err := validateToolCalls(calls); err != nil {
+			emit(handler, Event{Type: EventMessageFailed, Duration: modelDuration, Error: err.Error()})
+			emit(handler, Event{Type: EventTurnFailed, Duration: modelDuration, Error: err.Error()})
+			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
+			return result, err
+		}
+		if len(calls) == 0 && strings.TrimSpace(output.Text()) == "" {
+			emit(handler, Event{
+				Type:     EventMessageFailed,
+				Duration: modelDuration,
+				Error:    ErrEmptyModelOutput.Error(),
+			})
+			emit(handler, Event{
+				Type:     EventTurnFailed,
+				Duration: modelDuration,
+				Error:    ErrEmptyModelOutput.Error(),
+			})
+			emit(handler, Event{Type: EventAgentFailed, Error: ErrEmptyModelOutput.Error()})
+			return result, ErrEmptyModelOutput
 		}
 
-		output = cloneMessage(output)
-		if err := validateToolCalls(output.ToolCalls); err != nil {
-			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
-			return Message{}, err
-		}
-		if len(output.ToolCalls) == 0 && strings.TrimSpace(output.Content) == "" {
-			emit(handler, Event{Type: EventAgentFailed, Error: ErrEmptyModelOutput.Error()})
-			return Message{}, ErrEmptyModelOutput
-		}
 		messages = append(messages, output)
 		a.storeHistory(messages)
 		outputEvent := cloneMessage(output)
-		emit(handler, Event{Type: EventMessageCreated, Message: &outputEvent})
+		emit(handler, Event{Type: EventMessageCompleted, Message: &outputEvent})
 
-		if len(output.ToolCalls) == 0 {
-			emit(handler, Event{Type: EventTurnCompleted})
+		observation := ModelObservation{
+			Provider:   response.Provider,
+			Model:      response.Model,
+			ResponseID: response.ResponseID,
+			StopReason: response.StopReason,
+			Usage:      cloneUsage(response.Usage),
+			Duration:   modelDuration,
+			FirstDelta: cloneDuration(firstDelta),
+		}
+		result.Message = output
+		result.Turns++
+
+		if len(calls) == 0 {
+			emit(handler, Event{
+				Type:     EventTurnCompleted,
+				Model:    &observation,
+				Duration: modelDuration,
+			})
 			emit(handler, Event{Type: EventAgentCompleted})
-			return output, nil
+			return result, nil
 		}
 
-		for _, toolCall := range output.ToolCalls {
+		for _, toolCall := range calls {
 			call := cloneToolCall(toolCall)
 			emit(handler, Event{Type: EventToolStarted, ToolCall: &call})
+			toolStarted := time.Now()
 
-			result := Message{
-				Role:       RoleTool,
-				ToolCallID: call.ID,
-				ToolName:   call.Name,
-			}
-			tool, ok := a.tools[call.Name]
-			if !ok {
-				result.Content = fmt.Sprintf("tool %q is not registered", call.Name)
-				result.IsError = true
-				messages = append(messages, result)
-				a.storeHistory(messages)
-				emit(handler, Event{
-					Type:     EventToolCompleted,
-					ToolCall: &call,
-					Output:   result.Content,
-					IsError:  true,
-					Error:    result.Content,
-				})
-				continue
-			}
-
-			toolOutput, callErr := tool.Call(ctx, append(json.RawMessage(nil), call.Arguments...))
-			result.Content = toolOutput
-			if callErr != nil {
-				result.IsError = true
-				if result.Content == "" {
-					result.Content = callErr.Error()
-				}
-			}
-			messages = append(messages, result)
+			toolOutput, callErr := a.executeTool(ctx, call)
+			toolDuration := time.Since(toolStarted)
+			result.ToolDuration += toolDuration
+			toolResult := TextMessage(RoleTool, toolOutput)
+			toolResult.ToolCallID = call.ID
+			toolResult.ToolName = call.Name
+			toolResult.IsError = callErr != nil
+			messages = append(messages, toolResult)
 			a.storeHistory(messages)
+
 			event := Event{
 				Type:     EventToolCompleted,
 				ToolCall: &call,
-				Output:   result.Content,
+				Output:   toolOutput,
+				Duration: toolDuration,
 				IsError:  callErr != nil,
 			}
 			if callErr != nil {
@@ -240,11 +279,70 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Me
 			}
 			emit(handler, event)
 		}
-		emit(handler, Event{Type: EventTurnCompleted})
+		emit(handler, Event{
+			Type:     EventTurnCompleted,
+			Model:    &observation,
+			Duration: modelDuration,
+		})
 	}
 
 	emit(handler, Event{Type: EventAgentFailed, Error: ErrToolRoundLimit.Error()})
-	return Message{}, ErrToolRoundLimit
+	return result, ErrToolRoundLimit
+}
+
+func (a *Agent) executeTool(ctx context.Context, call ToolCall) (string, error) {
+	tool, ok := a.tools[call.Name]
+	if !ok {
+		err := fmt.Errorf("tool %q is not registered", call.Name)
+		return err.Error(), err
+	}
+
+	output, err := tool.Call(ctx, append(json.RawMessage(nil), call.Arguments...))
+	if err != nil && output == "" {
+		output = err.Error()
+	}
+	return output, err
+}
+
+func validateModelResponse(response ModelResponse, message Message) error {
+	if message.Role != RoleAssistant {
+		return fmt.Errorf("model returned role %q, want %q", message.Role, RoleAssistant)
+	}
+	if strings.TrimSpace(response.Provider) == "" {
+		return errors.New("model response provider is required")
+	}
+	if strings.TrimSpace(response.Model) == "" {
+		return errors.New("model response model is required")
+	}
+	switch response.StopReason {
+	case StopReasonStop, StopReasonLength, StopReasonToolCalls, StopReasonContentFilter:
+	default:
+		return fmt.Errorf("model returned unsupported stop reason %q", response.StopReason)
+	}
+	for index, content := range message.Content {
+		switch content.Type {
+		case ContentText, ContentReasoning:
+			if content.ToolCall != nil {
+				return fmt.Errorf("model content %d has an unexpected tool call", index)
+			}
+		case ContentToolCall:
+			if content.ToolCall == nil {
+				return fmt.Errorf("model content %d has no tool call", index)
+			}
+			if content.Text != "" {
+				return fmt.Errorf("model content %d has unexpected text", index)
+			}
+		default:
+			return fmt.Errorf("model content %d has unsupported type %q", index, content.Type)
+		}
+	}
+	if response.StopReason == StopReasonToolCalls && len(message.ToolCalls()) == 0 {
+		return errors.New("model stopped for tool calls without returning a tool call")
+	}
+	if response.StopReason != StopReasonToolCalls && len(message.ToolCalls()) > 0 {
+		return fmt.Errorf("model returned tool calls with stop reason %q", response.StopReason)
+	}
+	return nil
 }
 
 func validateToolCalls(calls []ToolCall) error {
@@ -307,9 +405,13 @@ func cloneMessages(messages []Message) []Message {
 
 func cloneMessage(message Message) Message {
 	cloned := message
-	cloned.ToolCalls = make([]ToolCall, len(message.ToolCalls))
-	for i, call := range message.ToolCalls {
-		cloned.ToolCalls[i] = cloneToolCall(call)
+	cloned.Content = make([]Content, len(message.Content))
+	for i, content := range message.Content {
+		cloned.Content[i] = content
+		if content.ToolCall != nil {
+			call := cloneToolCall(*content.ToolCall)
+			cloned.Content[i].ToolCall = &call
+		}
 	}
 	return cloned
 }
@@ -332,4 +434,57 @@ func cloneToolSpec(spec ToolSpec) ToolSpec {
 	cloned := spec
 	cloned.InputSchema = append(json.RawMessage(nil), spec.InputSchema...)
 	return cloned
+}
+
+func cloneDelta(delta ModelDelta) ModelDelta {
+	return delta
+}
+
+func cloneUsage(usage *Usage) *Usage {
+	if usage == nil {
+		return nil
+	}
+	cloned := *usage
+	if usage.CachedInputTokens != nil {
+		value := *usage.CachedInputTokens
+		cloned.CachedInputTokens = &value
+	}
+	if usage.ReasoningTokens != nil {
+		value := *usage.ReasoningTokens
+		cloned.ReasoningTokens = &value
+	}
+	return &cloned
+}
+
+func addUsage(total **Usage, usage *Usage) {
+	if usage == nil {
+		return
+	}
+	if *total == nil {
+		*total = &Usage{}
+	}
+	(*total).InputTokens += usage.InputTokens
+	(*total).OutputTokens += usage.OutputTokens
+	(*total).TotalTokens += usage.TotalTokens
+	addOptionalTokenCount(&(*total).CachedInputTokens, usage.CachedInputTokens)
+	addOptionalTokenCount(&(*total).ReasoningTokens, usage.ReasoningTokens)
+}
+
+func addOptionalTokenCount(total **int64, value *int64) {
+	if value == nil {
+		return
+	}
+	if *total == nil {
+		zero := int64(0)
+		*total = &zero
+	}
+	**total += *value
+}
+
+func cloneDuration(duration *time.Duration) *time.Duration {
+	if duration == nil {
+		return nil
+	}
+	value := *duration
+	return &value
 }

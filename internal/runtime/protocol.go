@@ -51,15 +51,23 @@ type protocolError struct {
 }
 
 type taskSnapshot struct {
-	ID          string `json:"id"`
-	RunID       string `json:"runId,omitempty"`
-	Status      string `json:"status"`
-	Prompt      string `json:"prompt"`
-	Output      string `json:"output,omitempty"`
-	Error       string `json:"error,omitempty"`
-	CreatedAt   string `json:"createdAt"`
-	UpdatedAt   string `json:"updatedAt"`
-	CompletedAt string `json:"completedAt,omitempty"`
+	ID              string       `json:"id"`
+	RunID           string       `json:"runId,omitempty"`
+	Status          string       `json:"status"`
+	Prompt          string       `json:"prompt"`
+	Output          string       `json:"output,omitempty"`
+	Error           string       `json:"error,omitempty"`
+	CreatedAt       string       `json:"createdAt"`
+	StartedAt       string       `json:"startedAt,omitempty"`
+	UpdatedAt       string       `json:"updatedAt"`
+	CompletedAt     string       `json:"completedAt,omitempty"`
+	QueueDurationMS *int64       `json:"queueDurationMs,omitempty"`
+	DurationMS      *int64       `json:"durationMs,omitempty"`
+	ModelDurationMS *int64       `json:"modelDurationMs,omitempty"`
+	ToolDurationMS  *int64       `json:"toolDurationMs,omitempty"`
+	FirstDeltaMS    *int64       `json:"firstDeltaMs,omitempty"`
+	Turns           *int         `json:"turns,omitempty"`
+	Usage           *agent.Usage `json:"usage,omitempty"`
 }
 
 type stateSnapshot struct {
@@ -90,20 +98,33 @@ type response struct {
 }
 
 type event struct {
-	Type            string          `json:"type"`
-	Protocol        string          `json:"protocol"`
-	ProtocolVersion string          `json:"protocolVersion"`
-	Sequence        uint64          `json:"sequence"`
-	Timestamp       time.Time       `json:"timestamp"`
-	SessionID       string          `json:"sessionId"`
-	TaskID          string          `json:"taskId,omitempty"`
-	RunID           string          `json:"runId,omitempty"`
-	TurnID          string          `json:"turnId,omitempty"`
-	MessageID       string          `json:"messageId,omitempty"`
-	Status          string          `json:"status,omitempty"`
-	Message         *agent.Message  `json:"message,omitempty"`
-	ToolCall        *agent.ToolCall `json:"toolCall,omitempty"`
-	Output          string          `json:"output,omitempty"`
-	IsError         bool            `json:"isError,omitempty"`
-	Error           string          `json:"error,omitempty"`
+	Type            string            `json:"type"`
+	Protocol        string            `json:"protocol"`
+	ProtocolVersion string            `json:"protocolVersion"`
+	Sequence        uint64            `json:"sequence"`
+	Timestamp       time.Time         `json:"timestamp"`
+	SessionID       string            `json:"sessionId"`
+	TaskID          string            `json:"taskId,omitempty"`
+	RunID           string            `json:"runId,omitempty"`
+	TurnID          string            `json:"turnId,omitempty"`
+	MessageID       string            `json:"messageId,omitempty"`
+	Status          string            `json:"status,omitempty"`
+	Message         *agent.Message    `json:"message,omitempty"`
+	Delta           *agent.ModelDelta `json:"delta,omitempty"`
+	Model           *modelObservation `json:"model,omitempty"`
+	ToolCall        *agent.ToolCall   `json:"toolCall,omitempty"`
+	Output          string            `json:"output,omitempty"`
+	DurationMS      *int64            `json:"durationMs,omitempty"`
+	IsError         bool              `json:"isError,omitempty"`
+	Error           string            `json:"error,omitempty"`
+}
+
+type modelObservation struct {
+	Provider     string           `json:"provider"`
+	Model        string           `json:"model"`
+	ResponseID   string           `json:"responseId,omitempty"`
+	StopReason   agent.StopReason `json:"stopReason"`
+	Usage        *agent.Usage     `json:"usage,omitempty"`
+	DurationMS   int64            `json:"durationMs"`
+	FirstDeltaMS *int64           `json:"firstDeltaMs,omitempty"`
 }

@@ -9,11 +9,12 @@ J is a minimal, customizable agent runtime for Go.
 
 J keeps only the mechanisms required to run a model/tool loop:
 
-- provider-neutral messages and tool calls
+- ordered text, reasoning, and tool-call content
 - explicit model and tool adapter contracts
-- bounded synchronous execution with cancellation
+- streaming model output
+- bounded execution and cancellation
 - conversation state
-- an optional FIFO task queue and canonical JSONL event stream
+- an optional FIFO task queue and typed JSONL event stream
 
 Everything else belongs in an adapter or product built on J.
 
@@ -24,37 +25,53 @@ The core does not provide:
 - subagents
 - MCP or skills
 - plugin discovery
-- model fleets or provider selection
+- model fleets or automatic provider selection
 - memory or session persistence
 - compaction and retry policy
-- AG-UI, A2A, or provider-specific protocol translations
 - a built-in shell tool
 
 ## Requirements
 
 - Go 1.23 or newer
 
-## Try the reference CLI
+## Use Ollama
 
-The checked-in binary uses a deterministic echo model. It verifies wiring
-without provider credentials; it is not an LLM integration.
-
-```bash
-go run ./cmd/j "hello"
-```
-
-Build and verify:
+J uses Ollama's native `/api/chat` protocol. Choose the model explicitly:
 
 ```bash
-make build
-make check
+go run ./cmd/j \
+  --provider ollama \
+  --model qwen3 \
+  "Explain why small interfaces are useful."
 ```
+
+Set a custom endpoint with `--base-url` or `J_BASE_URL`. Enable or disable
+thinking explicitly with `--thinking enabled` or `--thinking disabled`;
+`default` leaves the choice to Ollama.
+
+## Use DeepSeek
+
+J uses DeepSeek's streaming Chat Completions protocol. The model name is
+deliberately required because provider model names and defaults can change.
+
+```bash
+export DEEPSEEK_API_KEY='...'
+
+go run ./cmd/j \
+  --provider deepseek \
+  --model deepseek-v4-pro \
+  "Explain why small interfaces are useful."
+```
+
+The API key is read only from `DEEPSEEK_API_KEY`, not from a command-line flag.
+Provider, model, base URL, and thinking mode may also be supplied through
+`J_PROVIDER`, `J_MODEL`, `J_BASE_URL`, and `J_THINKING`. DeepSeek reasoning
+effort is available as `--reasoning-effort high|max` or
+`J_REASONING_EFFORT`.
 
 ## Embed J
 
-Implement `agent.Model`, optionally implement `agent.Tool`, then construct an
-agent. A model receives both conversation history and strongly described tool
-schemas on every turn.
+Use a checked-in adapter or implement the small `agent.Model` contract:
 
 ```go
 package main
@@ -63,23 +80,16 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/z-chenhao/J/adapter/ollama"
 	"github.com/z-chenhao/J/agent"
 )
 
-type model struct{}
-
-func (model) Complete(
-	ctx context.Context,
-	request agent.ModelRequest,
-) (agent.Message, error) {
-	return agent.Message{
-		Role:    agent.RoleAssistant,
-		Content: "hello from a custom model",
-	}, nil
-}
-
 func main() {
-	runner, err := agent.New(model{})
+	model, err := ollama.New(ollama.Config{Model: "qwen3"})
+	if err != nil {
+		panic(err)
+	}
+	runner, err := agent.New(model)
 	if err != nil {
 		panic(err)
 	}
@@ -87,13 +97,14 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(result.Content)
+	fmt.Println(result.Message.Text())
 }
 ```
 
-The package is experimental because the model/tool seam has not yet been
-validated by multiple independent production adapters. See
-[Architecture](docs/architecture.md) for its intended stability boundary.
+The `agent` package is experimental. Its seam is now exercised by two
+independent adapters, but stability will be declared only after real external
+consumers validate its semantics. See [Architecture](docs/architecture.md) and
+[model protocol research](docs/model-protocol.md).
 
 ## JSONL reference transport
 
@@ -102,7 +113,7 @@ Run:
 ```bash
 printf '%s\n' \
   '{"id":"1","type":"submit","message":"hello"}' |
-  go run ./cmd/j --rpc
+  go run ./cmd/j --rpc --provider ollama --model qwen3
 ```
 
 The experimental `j-core` protocol supports:
@@ -114,36 +125,27 @@ The experimental `j-core` protocol supports:
 - `messages`
 - `reset`
 
-The transport has one FIFO queue and one active task. It does not advertise
-unimplemented commands or pretend to implement other agent protocols. See the
-[protocol reference](docs/protocol.md).
+Its event stream exposes message deltas, normalized model identity, stop
+reason, token usage, first-delta latency, total model/tool latency, and task
+queue/run duration. See the [protocol reference](docs/protocol.md).
 
-## J-Space research
+## Build and verify
 
-Anthropic's J-space is an emergent family of internal model representations
-observed with the Jacobian lens. It is not an agent API or a runtime dependency.
-
-J uses J-space research outside the core to compare open-weight models and
-harness recipes. A recipe is adopted only when J-lens observations and
-behavioral measurements agree that it improves a concrete outcome. The
-reproducible study boundary is documented in
-[research/jspace](research/jspace/README.md).
-
-Primary sources:
-
-- [Anthropic: A global workspace in language models](https://www.anthropic.com/research/global-workspace)
-- [Jacobian lens reference implementation](https://github.com/anthropics/jacobian-lens)
-- [Full research paper](https://transformer-circuits.pub/2026/workspace/)
+```bash
+make build
+make check
+```
 
 ## Project layout
 
 ```text
+adapter/deepseek/   DeepSeek protocol adapter
+adapter/ollama/     Ollama native protocol adapter
 agent/              experimental embeddable Go runtime
 cmd/j/              reference CLI and JSONL process
-internal/demo/      deterministic reference model
 internal/runtime/   private queue and JSONL transport
 docs/               architecture and protocol contracts
-research/jspace/    external model/harness research method
+research/           external model and harness research
 ```
 
 ## Security

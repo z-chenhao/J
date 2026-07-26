@@ -1,11 +1,15 @@
 APP := j
 BIN_DIR := bin
 ENTRY := ./cmd/j
+PROVIDER ?=
+MODEL ?=
 
 .PHONY: run build test race fmt-check vet clean check
 
 run:
-	go run $(ENTRY)
+	@test -n "$(PROVIDER)" || (echo "PROVIDER is required" && exit 1)
+	@test -n "$(MODEL)" || (echo "MODEL is required" && exit 1)
+	go run $(ENTRY) --provider $(PROVIDER) --model $(MODEL)
 
 build:
 	mkdir -p $(BIN_DIR)

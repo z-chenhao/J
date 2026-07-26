@@ -43,6 +43,10 @@ terminal event. Canceling a task that is already terminal fails with
 {"id":"3","type":"task.get","taskId":"task-000001"}
 ```
 
+A settled task reports observed timestamps, queue and run duration, model/tool
+duration, first-delta latency, turn count, and aggregate token usage when the
+provider reported it.
+
 ### State and messages
 
 ```json
@@ -52,6 +56,29 @@ terminal event. Canceling a task that is already terminal fails with
 
 State contains observed runtime facts only: session identity, active and queued
 work, message count, and ordered task snapshots.
+
+Messages contain ordered content blocks:
+
+```json
+{
+  "role":"assistant",
+  "content":[
+    {"type":"reasoning","text":"..."},
+    {"type":"text","text":"I will check."},
+    {
+      "type":"tool_call",
+      "toolCall":{
+        "id":"call-1",
+        "name":"weather",
+        "arguments":{"city":"Hangzhou"}
+      }
+    }
+  ]
+}
+```
+
+Reasoning is retained for correct provider continuation. A client may omit it
+from display.
 
 ### Reset
 
@@ -81,14 +108,49 @@ task.queued
 task.started
 agent.started
   turn.started
-  message.created and/or tool.started + tool.completed
+    message.started
+    message.delta*
+    message.completed
+    tool.started + tool.completed (zero or more)
   turn.completed
 agent.completed
 task.completed
 ```
 
-`message.created` is used instead of artificial start/end pairs because the
-current model contract is non-streaming.
+`message.delta` contains a typed `delta`:
+
+```json
+{
+  "type":"message.delta",
+  "delta":{"type":"text","index":0,"delta":"hello"}
+}
+```
+
+Delta types are `text`, `reasoning`, and `tool_call`. `index` is scoped to the
+delta type, so interleaved streams remain unambiguous.
+
+`turn.completed` contains a normalized model observation:
+
+```json
+{
+  "type":"turn.completed",
+  "model":{
+    "provider":"ollama",
+    "model":"qwen3",
+    "stopReason":"stop",
+    "usage":{"inputTokens":12,"outputTokens":8,"totalTokens":20},
+    "durationMs":420,
+    "firstDeltaMs":85
+  }
+}
+```
+
+`firstDeltaMs` is absent for a non-streaming custom adapter. Tool completion
+events carry `durationMs`. Model duration is end-to-end wall time and therefore
+includes synchronous delta delivery to the run's event handler.
+
+If a started message or turn fails, it terminates with `message.failed` or
+`turn.failed` before `agent.failed`.
 
 Terminal task events are mutually exclusive:
 
@@ -112,10 +174,10 @@ Failed command responses use:
 ```
 
 Unknown fields and commands are rejected. Individual command lines are limited
-to 1 MiB.
+to 1 MiB. Provider credentials are never written to protocol output.
 
 ## Not supported
 
-There are no aliases, protocol-selection environment variables, steering or
-follow-up queue modes, provider management, retry, compaction, or compatibility
-claims for other agent protocols.
+There are no aliases, universal hooks, protocol-selection environment
+variables, steering or follow-up queue modes, provider management, automatic
+retry, compaction, or compatibility claims for other agent protocols.

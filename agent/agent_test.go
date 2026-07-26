@@ -8,14 +8,37 @@ import (
 )
 
 type scriptedModel struct {
-	outputs  []Message
+	outputs  []ModelResponse
+	deltas   [][]ModelDelta
 	requests []ModelRequest
 }
 
-func (m *scriptedModel) Complete(_ context.Context, request ModelRequest) (Message, error) {
+type modelFunc func(context.Context, ModelRequest, func(ModelDelta)) (ModelResponse, error)
+
+func (function modelFunc) Complete(
+	ctx context.Context,
+	request ModelRequest,
+	emit func(ModelDelta),
+) (ModelResponse, error) {
+	return function(ctx, request, emit)
+}
+
+func (m *scriptedModel) Complete(
+	_ context.Context,
+	request ModelRequest,
+	emit func(ModelDelta),
+) (ModelResponse, error) {
 	m.requests = append(m.requests, request)
 	if len(m.outputs) == 0 {
-		return Message{}, errors.New("no scripted output")
+		return ModelResponse{}, errors.New("no scripted output")
+	}
+	if len(m.deltas) > 0 {
+		for _, delta := range m.deltas[0] {
+			if emit != nil {
+				emit(delta)
+			}
+		}
+		m.deltas = m.deltas[1:]
 	}
 	output := m.outputs[0]
 	m.outputs = m.outputs[1:]
@@ -41,17 +64,35 @@ func (t *collectTool) Call(_ context.Context, arguments json.RawMessage) (string
 	return t.arguments["text"], nil
 }
 
-func TestRunProvidesToolSpecsAndExecutesTool(t *testing.T) {
-	model := &scriptedModel{outputs: []Message{
-		{
-			Role: RoleAssistant,
-			ToolCalls: []ToolCall{{
-				ID:        "call-1",
-				Name:      "collect",
-				Arguments: json.RawMessage(`{"text":"hello"}`),
-			}},
+func response(message Message, reason StopReason) ModelResponse {
+	return ModelResponse{
+		Message:    message,
+		Provider:   "test",
+		Model:      "test-model",
+		StopReason: reason,
+		Usage: &Usage{
+			InputTokens:  2,
+			OutputTokens: 1,
+			TotalTokens:  3,
 		},
-		{Role: RoleAssistant, Content: "done"},
+	}
+}
+
+func toolMessage(id, name, arguments string) Message {
+	call := ToolCall{ID: id, Name: name, Arguments: json.RawMessage(arguments)}
+	return Message{
+		Role: RoleAssistant,
+		Content: []Content{{
+			Type:     ContentToolCall,
+			ToolCall: &call,
+		}},
+	}
+}
+
+func TestRunProvidesToolSpecsAndExecutesTool(t *testing.T) {
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(toolMessage("call-1", "collect", `{"text":"hello"}`), StopReasonToolCalls),
+		response(TextMessage(RoleAssistant, "done"), StopReasonStop),
 	}}
 	tool := &collectTool{}
 	runner, err := New(model, WithTools(tool), WithSystemPrompt("system"))
@@ -63,8 +104,11 @@ func TestRunProvidesToolSpecsAndExecutesTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	if result.Content != "done" {
-		t.Fatalf("result=%q, want done", result.Content)
+	if result.Message.Text() != "done" {
+		t.Fatalf("result=%q, want done", result.Message.Text())
+	}
+	if result.Turns != 2 || result.Usage == nil || result.Usage.TotalTokens != 6 {
+		t.Fatalf("unexpected run diagnostics: %#v", result)
 	}
 	if len(model.requests) != 2 || len(model.requests[0].Tools) != 1 {
 		t.Fatalf("model did not receive tool specs: %#v", model.requests)
@@ -77,20 +121,23 @@ func TestRunProvidesToolSpecsAndExecutesTool(t *testing.T) {
 	if len(history) != 5 {
 		t.Fatalf("history length=%d, want 5", len(history))
 	}
-	if history[3].Role != RoleTool || history[3].ToolCallID != "call-1" {
+	if history[3].Role != RoleTool || history[3].ToolCallID != "call-1" || history[3].Text() != "hello" {
 		t.Fatalf("unexpected tool result: %#v", history[3])
 	}
 }
 
-func TestRunEmitsBalancedLifecycle(t *testing.T) {
-	model := &scriptedModel{outputs: []Message{{Role: RoleAssistant, Content: "done"}}}
+func TestRunEmitsStreamingLifecycleAndObservation(t *testing.T) {
+	model := &scriptedModel{
+		outputs: []ModelResponse{response(TextMessage(RoleAssistant, "done"), StopReasonStop)},
+		deltas:  [][]ModelDelta{{{Type: DeltaText, Index: 0, Delta: "done"}}},
+	}
 	runner, err := New(model)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
-	var events []EventType
+	var events []Event
 	_, err = runner.Run(context.Background(), "hello", func(event Event) {
-		events = append(events, event.Type)
+		events = append(events, event)
 	})
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
@@ -99,7 +146,9 @@ func TestRunEmitsBalancedLifecycle(t *testing.T) {
 	want := []EventType{
 		EventAgentStarted,
 		EventTurnStarted,
-		EventMessageCreated,
+		EventMessageStarted,
+		EventMessageDelta,
+		EventMessageCompleted,
 		EventTurnCompleted,
 		EventAgentCompleted,
 	}
@@ -107,21 +156,60 @@ func TestRunEmitsBalancedLifecycle(t *testing.T) {
 		t.Fatalf("events=%v, want %v", events, want)
 	}
 	for i := range want {
-		if events[i] != want[i] {
-			t.Fatalf("events[%d]=%q, want %q", i, events[i], want[i])
+		if events[i].Type != want[i] {
+			t.Fatalf("events[%d]=%q, want %q", i, events[i].Type, want[i])
+		}
+	}
+	observation := events[5].Model
+	if observation == nil || observation.Provider != "test" || observation.StopReason != StopReasonStop {
+		t.Fatalf("turn observation=%#v", observation)
+	}
+}
+
+func TestRunTerminatesStartedMessageAndTurnOnStreamFailure(t *testing.T) {
+	model := modelFunc(func(
+		_ context.Context,
+		_ ModelRequest,
+		emit func(ModelDelta),
+	) (ModelResponse, error) {
+		emit(ModelDelta{Type: DeltaText, Index: 0, Delta: "partial"})
+		return ModelResponse{}, errors.New("stream failed")
+	})
+	runner, err := New(model)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	var events []EventType
+	_, err = runner.Run(context.Background(), "hello", func(event Event) {
+		events = append(events, event.Type)
+	})
+	if err == nil {
+		t.Fatal("expected stream failure")
+	}
+	want := []EventType{
+		EventAgentStarted,
+		EventTurnStarted,
+		EventMessageStarted,
+		EventMessageDelta,
+		EventMessageFailed,
+		EventTurnFailed,
+		EventAgentFailed,
+	}
+	if len(events) != len(want) {
+		t.Fatalf("events=%v, want %v", events, want)
+	}
+	for index := range want {
+		if events[index] != want[index] {
+			t.Fatalf("events[%d]=%q, want %q", index, events[index], want[index])
 		}
 	}
 }
 
 func TestHistoryIsDeepCopy(t *testing.T) {
-	model := &scriptedModel{outputs: []Message{{
-		Role: RoleAssistant,
-		ToolCalls: []ToolCall{{
-			ID:        "call-1",
-			Name:      "missing",
-			Arguments: json.RawMessage(`{"value":"original"}`),
-		}},
-	}, {Role: RoleAssistant, Content: "done"}}}
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(toolMessage("call-1", "missing", `{"value":"original"}`), StopReasonToolCalls),
+		response(TextMessage(RoleAssistant, "done"), StopReasonStop),
+	}}
 	runner, err := New(model)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -131,10 +219,10 @@ func TestHistoryIsDeepCopy(t *testing.T) {
 	}
 
 	first := runner.History()
-	first[1].ToolCalls[0].Arguments[0] = 'x'
+	first[1].Content[0].ToolCall.Arguments[0] = 'x'
 	second := runner.History()
-	if string(second[1].ToolCalls[0].Arguments) != `{"value":"original"}` {
-		t.Fatalf("history aliases caller memory: %s", second[1].ToolCalls[0].Arguments)
+	if got := string(second[1].Content[0].ToolCall.Arguments); got != `{"value":"original"}` {
+		t.Fatalf("history aliases caller memory: %s", got)
 	}
 }
 
@@ -146,13 +234,9 @@ func TestNewRejectsAmbiguousTools(t *testing.T) {
 }
 
 func TestRunRejectsInvalidToolCallIdentity(t *testing.T) {
-	model := &scriptedModel{outputs: []Message{{
-		Role: RoleAssistant,
-		ToolCalls: []ToolCall{{
-			Name:      "collect",
-			Arguments: json.RawMessage(`{}`),
-		}},
-	}}}
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(toolMessage("", "collect", `{}`), StopReasonToolCalls),
+	}}
 	runner, err := New(model)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -163,14 +247,9 @@ func TestRunRejectsInvalidToolCallIdentity(t *testing.T) {
 }
 
 func TestToolRoundLimitIsExplicit(t *testing.T) {
-	model := &scriptedModel{outputs: []Message{{
-		Role: RoleAssistant,
-		ToolCalls: []ToolCall{{
-			ID:        "call-1",
-			Name:      "missing",
-			Arguments: json.RawMessage(`{}`),
-		}},
-	}}}
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(toolMessage("call-1", "missing", `{}`), StopReasonToolCalls),
+	}}
 	runner, err := New(model, WithMaxToolRounds(1))
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -181,9 +260,10 @@ func TestToolRoundLimitIsExplicit(t *testing.T) {
 }
 
 func TestResetClearsHistory(t *testing.T) {
-	tool := &collectTool{}
-	model := &scriptedModel{outputs: []Message{{Role: RoleAssistant, Content: "done"}}}
-	runner, err := New(model, WithTools(tool))
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(TextMessage(RoleAssistant, "done"), StopReasonStop),
+	}}
+	runner, err := New(model)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
@@ -197,7 +277,9 @@ func TestResetClearsHistory(t *testing.T) {
 }
 
 func TestRunRejectsEmptyModelOutput(t *testing.T) {
-	model := &scriptedModel{outputs: []Message{{Role: RoleAssistant}}}
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(Message{Role: RoleAssistant}, StopReasonStop),
+	}}
 	runner, err := New(model)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
@@ -208,7 +290,9 @@ func TestRunRejectsEmptyModelOutput(t *testing.T) {
 }
 
 func TestRunHonorsCanceledContext(t *testing.T) {
-	model := &scriptedModel{outputs: []Message{{Role: RoleAssistant, Content: "unused"}}}
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(TextMessage(RoleAssistant, "unused"), StopReasonStop),
+	}}
 	runner, err := New(model)
 	if err != nil {
 		t.Fatalf("New() error: %v", err)

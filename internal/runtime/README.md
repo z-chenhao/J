@@ -16,3 +16,7 @@ Supported commands:
 There are no command aliases, protocol-selection environment variables, or
 advertised placeholders for unimplemented features. Downstream systems may
 translate the single `j-core` event stream outside J.
+
+The stream reports model deltas, normalized usage and stop reason, first-delta
+and total latency, tool duration, and task queue/run duration. It does not
+provide a generic lifecycle Hook API.

@@ -2,10 +2,10 @@
 
 ## Decision summary
 
-J exposes the smallest currently justified embedding seam: model requests,
-tool specifications and calls, messages, and synchronous per-run events. The
-agent loop owns the invariants. Product policy, providers, transports, and
-research tooling remain replaceable outside it.
+J exposes the smallest currently justified embedding seam: ordered model
+content, tool specifications and calls, streaming deltas, normalized completion
+facts, and synchronous per-run events. The agent loop owns the invariants.
+Product policy, transports, and research tooling remain replaceable outside it.
 
 The public API and wire protocol are experimental. Stability must be earned by
 real consumers rather than declared from the first implementation.
@@ -21,19 +21,22 @@ Current consumers are:
 The runtime must:
 
 - preserve conversation and tool-call identity
+- preserve provider-required reasoning across tool continuations
 - give models the exact tool schemas they may use
 - return tool errors to the model
 - bound tool-call loops
 - propagate cancellation
 - make task terminal states unambiguous
 - emit an ordered, writable event stream
+- report comparable stop, usage, and latency facts
 
 ## Mechanism and policy
 
 ### Runtime mechanism
 
-- `agent.Message`, `agent.ToolCall`, and their identity fields
+- `agent.Message`, ordered `agent.Content`, and `agent.ToolCall`
 - `agent.Model` and `agent.Tool`
+- typed model deltas and normalized model observations
 - bounded model/tool execution
 - cancellation through `context.Context`
 - defensive conversation snapshots
@@ -48,16 +51,17 @@ The runtime must:
 - model routing and harness recipes
 - transport and downstream protocol translation
 
-The reference echo model and JSONL process are examples, not mandatory
-framework semantics.
+The DeepSeek and Ollama adapters validate the model seam. The JSONL process is
+a reference transport, not mandatory framework semantics.
 
 ## Openness decision
 
 ### Experimental public contract
 
 Package `agent` is intended for external Go embedders. Its responsibility is
-one conversation-scoped model/tool loop. It does not own provider policy,
-process transport, or durable task state.
+one conversation-scoped model/tool loop. Provider wire details live in public
+adapter packages; the agent package does not own provider selection, process
+transport, or durable task state.
 
 Evolution strategy:
 

@@ -15,7 +15,7 @@ import (
 )
 
 type runner interface {
-	Run(context.Context, string, agent.EventHandler) (agent.Message, error)
+	Run(context.Context, string, agent.EventHandler) (agent.RunResult, error)
 	History() []agent.Message
 	Reset()
 }
@@ -28,8 +28,10 @@ type taskState struct {
 	Output      string
 	Error       string
 	CreatedAt   time.Time
+	StartedAt   time.Time
 	UpdatedAt   time.Time
 	CompletedAt time.Time
+	Result      agent.RunResult
 }
 
 func (t taskState) snapshot() taskSnapshot {
@@ -46,6 +48,19 @@ func (t taskState) snapshot() taskSnapshot {
 	if !t.CompletedAt.IsZero() {
 		snapshot.CompletedAt = t.CompletedAt.UTC().Format(time.RFC3339Nano)
 	}
+	if !t.StartedAt.IsZero() {
+		snapshot.StartedAt = t.StartedAt.UTC().Format(time.RFC3339Nano)
+		snapshot.QueueDurationMS = milliseconds(t.StartedAt.Sub(t.CreatedAt))
+	}
+	if !t.StartedAt.IsZero() && !t.CompletedAt.IsZero() {
+		snapshot.DurationMS = milliseconds(t.CompletedAt.Sub(t.StartedAt))
+		snapshot.ModelDurationMS = milliseconds(t.Result.ModelDuration)
+		snapshot.ToolDurationMS = milliseconds(t.Result.ToolDuration)
+		turns := t.Result.Turns
+		snapshot.Turns = &turns
+		snapshot.Usage = cloneUsage(t.Result.Usage)
+	}
+	snapshot.FirstDeltaMS = durationMilliseconds(t.Result.FirstDelta)
 	return snapshot
 }
 
@@ -55,20 +70,21 @@ type Runtime struct {
 	runner runner
 	out    io.Writer
 
-	mu             sync.Mutex
-	sessionID      string
-	taskCounter    uint64
-	runCounter     uint64
-	turnCounter    uint64
-	messageCounter uint64
-	eventSequence  uint64
-	tasks          map[string]*taskState
-	queue          []string
-	workerRunning  bool
-	activeTaskID   string
-	activeRunID    string
-	activeTurnID   string
-	cancelActive   context.CancelFunc
+	mu              sync.Mutex
+	sessionID       string
+	taskCounter     uint64
+	runCounter      uint64
+	turnCounter     uint64
+	messageCounter  uint64
+	eventSequence   uint64
+	tasks           map[string]*taskState
+	queue           []string
+	workerRunning   bool
+	activeTaskID    string
+	activeRunID     string
+	activeTurnID    string
+	activeMessageID string
+	cancelActive    context.CancelFunc
 
 	writerMu sync.Mutex
 	errMu    sync.Mutex
@@ -212,10 +228,12 @@ func (r *Runtime) runNext() bool {
 	now := time.Now()
 	task.RunID = runID
 	task.Status = taskRunning
+	task.StartedAt = now
 	task.UpdatedAt = now
 	r.activeTaskID = taskID
 	r.activeRunID = runID
 	r.activeTurnID = ""
+	r.activeMessageID = ""
 	r.cancelActive = cancel
 	r.mu.Unlock()
 
@@ -234,14 +252,16 @@ func (r *Runtime) runNext() bool {
 	}
 	task.Status = finalStatus
 	task.Error = finalError
+	task.Result = result
 	if runErr == nil {
-		task.Output = result.Content
+		task.Output = result.Message.Text()
 	}
 	task.UpdatedAt = time.Now()
 	task.CompletedAt = task.UpdatedAt
 	r.activeTaskID = ""
 	r.activeRunID = ""
 	r.activeTurnID = ""
+	r.activeMessageID = ""
 	r.cancelActive = nil
 	r.mu.Unlock()
 
@@ -260,10 +280,26 @@ func (r *Runtime) forwardAgentEvent(agentEvent agent.Event) {
 	wireEvent := event{
 		Type:     string(agentEvent.Type),
 		Message:  agentEvent.Message,
+		Delta:    agentEvent.Delta,
 		ToolCall: agentEvent.ToolCall,
 		Output:   agentEvent.Output,
 		IsError:  agentEvent.IsError,
 		Error:    agentEvent.Error,
+	}
+	switch agentEvent.Type {
+	case agent.EventMessageFailed, agent.EventTurnFailed, agent.EventToolCompleted:
+		wireEvent.DurationMS = milliseconds(agentEvent.Duration)
+	}
+	if agentEvent.Model != nil {
+		wireEvent.Model = &modelObservation{
+			Provider:     agentEvent.Model.Provider,
+			Model:        agentEvent.Model.Model,
+			ResponseID:   agentEvent.Model.ResponseID,
+			StopReason:   agentEvent.Model.StopReason,
+			Usage:        cloneUsage(agentEvent.Model.Usage),
+			DurationMS:   agentEvent.Model.Duration.Milliseconds(),
+			FirstDeltaMS: durationMilliseconds(agentEvent.Model.FirstDelta),
+		}
 	}
 
 	r.mu.Lock()
@@ -274,9 +310,18 @@ func (r *Runtime) forwardAgentEvent(agentEvent agent.Event) {
 	case agent.EventTurnCompleted:
 		wireEvent.TurnID = r.activeTurnID
 		r.activeTurnID = ""
-	case agent.EventMessageCreated:
+	case agent.EventTurnFailed:
+		wireEvent.TurnID = r.activeTurnID
+		r.activeTurnID = ""
+	case agent.EventMessageStarted:
 		r.messageCounter++
-		wireEvent.MessageID = fmt.Sprintf("message-%06d", r.messageCounter)
+		r.activeMessageID = fmt.Sprintf("message-%06d", r.messageCounter)
+		wireEvent.MessageID = r.activeMessageID
+	case agent.EventMessageDelta, agent.EventMessageCompleted, agent.EventMessageFailed:
+		wireEvent.MessageID = r.activeMessageID
+		if agentEvent.Type == agent.EventMessageCompleted || agentEvent.Type == agent.EventMessageFailed {
+			r.activeMessageID = ""
+		}
 	}
 	r.mu.Unlock()
 	r.emit(wireEvent)
@@ -361,6 +406,7 @@ func (r *Runtime) reset() bool {
 	r.runCounter = 0
 	r.turnCounter = 0
 	r.messageCounter = 0
+	r.activeMessageID = ""
 	r.sessionID = fmt.Sprintf("session-%d", time.Now().UnixNano())
 	r.mu.Unlock()
 	r.runner.Reset()
@@ -455,4 +501,33 @@ func (r *Runtime) Err() error {
 	r.errMu.Lock()
 	defer r.errMu.Unlock()
 	return r.writeErr
+}
+
+func cloneUsage(usage *agent.Usage) *agent.Usage {
+	if usage == nil {
+		return nil
+	}
+	cloned := *usage
+	if usage.CachedInputTokens != nil {
+		value := *usage.CachedInputTokens
+		cloned.CachedInputTokens = &value
+	}
+	if usage.ReasoningTokens != nil {
+		value := *usage.ReasoningTokens
+		cloned.ReasoningTokens = &value
+	}
+	return &cloned
+}
+
+func durationMilliseconds(duration *time.Duration) *int64 {
+	if duration == nil {
+		return nil
+	}
+	value := duration.Milliseconds()
+	return &value
+}
+
+func milliseconds(duration time.Duration) *int64 {
+	value := duration.Milliseconds()
+	return &value
 }
