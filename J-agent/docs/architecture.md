@@ -41,7 +41,7 @@ The runtime must:
 - `agent.Message`, ordered `agent.Content`, and `agent.ToolCall`
 - `agent.Model` and `agent.Tool`
 - typed model deltas and normalized model observations
-- bounded model/tool execution
+- context-governed model/tool execution
 - cancellation through `context.Context`
 - defensive conversation snapshots
 - validated construction-time conversation restoration
@@ -49,13 +49,11 @@ The runtime must:
 
 One `Agent` owns one serialized conversation. A run commits its user message
 before model execution and then commits only completed, accepted model/tool
-messages. An invalid or over-limit model response is not committed. A tool
-round means one accepted model response containing one or more tool calls,
-followed by execution of those calls; the final answer receives its own model
-turn after the last permitted tool round. The default allowance is 32 completed
-tool rounds: high enough for an extended coding workflow while retaining a
-finite runaway-loop fuse. Embedders can narrow or widen that budget through
-`WithMaxToolRounds`.
+messages. An invalid model response is not committed. A tool round means one
+accepted model response containing one or more tool calls, followed by
+execution of those calls. J-agent does not count or cap tool rounds; the run
+continues until the model returns a final answer or the caller's
+`context.Context` ends.
 
 Per-run event handlers execute synchronously to preserve ordering. They may
 read `History`, but must not reenter `Run` or `Reset` on the same `Agent`.

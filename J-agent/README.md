@@ -12,7 +12,7 @@ J-agent keeps only the mechanisms required to run a model/tool loop:
 - ordered text, reasoning, and tool-call content
 - explicit model and tool adapter contracts
 - streaming model output
-- bounded execution and cancellation
+- context-governed execution and cancellation
 - conversation state
 - an optional FIFO task queue and typed JSONL event stream
 
@@ -106,11 +106,10 @@ An embedding application still chooses its complete tool set through
 Bash package does not define a generic terminal, executor, approval, or sandbox
 interface.
 
-The runtime permits 32 completed tool rounds by default before treating another
-tool request as a runaway loop. A final answer still receives its own model
-turn. Embedders with a different execution budget can set the existing
-`agent.WithMaxToolRounds` option; the limit remains a safety fuse rather than a
-normal workflow target.
+The runtime does not impose a tool-round limit. Model/tool continuation remains
+open until the model returns a final answer or the caller's `context.Context`
+ends. Deadlines, cancellation, and any product execution budget remain
+composition policy outside J-agent.
 
 ## Embed J-agent
 

@@ -13,14 +13,9 @@ import (
 var (
 	// ErrEmptyInput is returned when a run has no user content.
 	ErrEmptyInput = errors.New("input is empty")
-	// ErrToolRoundLimit is returned when a model requests another tool after the
-	// configured number of tool rounds has completed.
-	ErrToolRoundLimit = errors.New("tool round limit exceeded")
 	// ErrEmptyModelOutput is returned when a model produces neither text nor tools.
 	ErrEmptyModelOutput = errors.New("model returned an empty assistant message")
 )
-
-const defaultMaxToolRounds = 32
 
 // Option configures an Agent through one of this package's With functions.
 type Option interface {
@@ -34,28 +29,15 @@ func (option optionFunc) apply(cfg *config) error {
 }
 
 type config struct {
-	systemPrompt  string
-	maxToolRounds int
-	tools         []Tool
-	history       []Message
+	systemPrompt string
+	tools        []Tool
+	history      []Message
 }
 
 // WithSystemPrompt sets an optional system message prepended to each session.
 func WithSystemPrompt(prompt string) Option {
 	return optionFunc(func(cfg *config) error {
 		cfg.systemPrompt = strings.TrimSpace(prompt)
-		return nil
-	})
-}
-
-// WithMaxToolRounds limits completed model/tool rounds. A final model turn is
-// still allowed after the last permitted tool round.
-func WithMaxToolRounds(rounds int) Option {
-	return optionFunc(func(cfg *config) error {
-		if rounds < 1 {
-			return errors.New("max tool rounds must be positive")
-		}
-		cfg.maxToolRounds = rounds
 		return nil
 	})
 }
@@ -81,11 +63,10 @@ func WithHistory(history ...Message) Option {
 
 // Agent serializes runs over one conversation history.
 type Agent struct {
-	model         Model
-	systemPrompt  string
-	maxToolRounds int
-	tools         map[string]Tool
-	toolSpecs     []ToolSpec
+	model        Model
+	systemPrompt string
+	tools        map[string]Tool
+	toolSpecs    []ToolSpec
 
 	runMu   sync.Mutex
 	stateMu sync.RWMutex
@@ -98,7 +79,7 @@ func New(model Model, options ...Option) (*Agent, error) {
 		return nil, errors.New("model is required")
 	}
 
-	cfg := config{maxToolRounds: defaultMaxToolRounds}
+	cfg := config{}
 	for _, option := range options {
 		if option == nil {
 			continue
@@ -141,18 +122,16 @@ func New(model Model, options ...Option) (*Agent, error) {
 	}
 
 	return &Agent{
-		model:         model,
-		systemPrompt:  cfg.systemPrompt,
-		maxToolRounds: cfg.maxToolRounds,
-		tools:         tools,
-		toolSpecs:     specs,
-		history:       cloneMessages(cfg.history),
+		model:        model,
+		systemPrompt: cfg.systemPrompt,
+		tools:        tools,
+		toolSpecs:    specs,
+		history:      cloneMessages(cfg.history),
 	}, nil
 }
 
 // Run appends one user message and advances the conversation until the model
-// returns a final assistant message or requests a tool beyond the configured
-// tool-round limit.
+// returns a final assistant message or the provided context ends.
 func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (RunResult, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -174,7 +153,6 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Ru
 	emit(handler, Event{Type: EventAgentStarted})
 
 	var result RunResult
-	toolRounds := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
@@ -247,26 +225,6 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Ru
 			emit(handler, Event{Type: EventAgentFailed, Error: ErrEmptyModelOutput.Error()})
 			return result, ErrEmptyModelOutput
 		}
-		if len(calls) > 0 && toolRounds >= a.maxToolRounds {
-			limitErr := fmt.Errorf(
-				"%w: %d completed rounds",
-				ErrToolRoundLimit,
-				a.maxToolRounds,
-			)
-			emit(handler, Event{
-				Type:     EventMessageFailed,
-				Duration: modelDuration,
-				Error:    limitErr.Error(),
-			})
-			emit(handler, Event{
-				Type:     EventTurnFailed,
-				Duration: modelDuration,
-				Error:    limitErr.Error(),
-			})
-			emit(handler, Event{Type: EventAgentFailed, Error: limitErr.Error()})
-			return result, limitErr
-		}
-
 		messages = append(messages, output)
 		a.storeHistory(messages)
 		outputEvent := cloneMessage(output)
@@ -321,7 +279,6 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Ru
 			}
 			emit(handler, event)
 		}
-		toolRounds++
 		emit(handler, Event{
 			Type:     EventTurnCompleted,
 			Model:    &observation,
