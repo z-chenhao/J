@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 const (
@@ -61,6 +61,16 @@ type Model struct {
 	client          *http.Client
 }
 
+// HTTPError reports a non-successful DeepSeek HTTP response.
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (err *HTTPError) Error() string {
+	return fmt.Sprintf("deepseek HTTP %d: %s", err.StatusCode, err.Message)
+}
+
 // New validates config and creates a DeepSeek adapter.
 func New(config Config) (*Model, error) {
 	config.APIKey = strings.TrimSpace(config.APIKey)
@@ -76,9 +86,15 @@ func New(config Config) (*Model, error) {
 		config.BaseURL = defaultBaseURL
 	}
 	parsed, err := url.Parse(config.BaseURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
-		return nil, errors.New("deepseek base URL must be absolute and must not contain credentials")
+	if err != nil || parsed.Host == "" || parsed.User != nil ||
+		(!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) ||
+		parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, errors.New(
+			"deepseek base URL must use HTTP or HTTPS and must not contain credentials, a query, or a fragment",
+		)
 	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/chat/completions"
+	parsed.RawPath = ""
 	switch config.Thinking {
 	case ThinkingDefault, ThinkingEnabled, ThinkingDisabled:
 	default:
@@ -98,7 +114,7 @@ func New(config Config) (*Model, error) {
 	return &Model{
 		apiKey:          config.APIKey,
 		model:           config.Model,
-		endpoint:        strings.TrimRight(config.BaseURL, "/") + "/chat/completions",
+		endpoint:        parsed.String(),
 		thinking:        config.Thinking,
 		reasoningEffort: config.ReasoningEffort,
 		client:          config.HTTPClient,
@@ -214,7 +230,7 @@ func (m *Model) Complete(
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return agent.ModelResponse{}, httpError("deepseek", response)
+		return agent.ModelResponse{}, httpError(response)
 	}
 
 	return m.readStream(response.Body, emit)
@@ -464,11 +480,11 @@ func mapStopReason(value string) (agent.StopReason, error) {
 	}
 }
 
-func httpError(provider string, response *http.Response) error {
+func httpError(response *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(response.Body, 64<<10))
 	message := strings.TrimSpace(string(body))
 	if message == "" {
 		message = http.StatusText(response.StatusCode)
 	}
-	return fmt.Errorf("%s HTTP %d: %s", provider, response.StatusCode, message)
+	return &HTTPError{StatusCode: response.StatusCode, Message: message}
 }

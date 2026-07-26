@@ -16,7 +16,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 const (
@@ -50,6 +50,16 @@ type Model struct {
 	turn     atomic.Uint64
 }
 
+// HTTPError reports a non-successful Ollama HTTP response.
+type HTTPError struct {
+	StatusCode int
+	Message    string
+}
+
+func (err *HTTPError) Error() string {
+	return fmt.Sprintf("ollama HTTP %d: %s", err.StatusCode, err.Message)
+}
+
 // New validates config and creates an Ollama adapter.
 func New(config Config) (*Model, error) {
 	config.Model = strings.TrimSpace(config.Model)
@@ -61,9 +71,15 @@ func New(config Config) (*Model, error) {
 		config.BaseURL = defaultBaseURL
 	}
 	parsed, err := url.Parse(config.BaseURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.User != nil {
-		return nil, errors.New("ollama base URL must be absolute and must not contain credentials")
+	if err != nil || parsed.Host == "" || parsed.User != nil ||
+		(!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) ||
+		parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return nil, errors.New(
+			"ollama base URL must use HTTP or HTTPS and must not contain credentials, a query, or a fragment",
+		)
 	}
+	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/api/chat"
+	parsed.RawPath = ""
 	switch config.Thinking {
 	case ThinkingDefault, ThinkingEnabled, ThinkingDisabled:
 	default:
@@ -79,7 +95,7 @@ func New(config Config) (*Model, error) {
 	}
 	return &Model{
 		model:    config.Model,
-		endpoint: strings.TrimRight(config.BaseURL, "/") + "/api/chat",
+		endpoint: parsed.String(),
 		think:    think,
 		client:   config.HTTPClient,
 	}, nil
@@ -386,5 +402,5 @@ func httpError(response *http.Response) error {
 	if message == "" {
 		message = http.StatusText(response.StatusCode)
 	}
-	return fmt.Errorf("ollama HTTP %d: %s", response.StatusCode, message)
+	return &HTTPError{StatusCode: response.StatusCode, Message: message}
 }

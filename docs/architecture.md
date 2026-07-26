@@ -2,7 +2,7 @@
 
 ## Decision summary
 
-J exposes the smallest currently justified embedding seam: ordered model
+J-agent exposes the smallest currently justified embedding seam: ordered model
 content, tool specifications and calls, streaming deltas, normalized completion
 facts, and synchronous per-run events. The agent loop owns the invariants.
 Product policy, transports, and research tooling remain replaceable outside it.
@@ -12,11 +12,14 @@ real consumers rather than declared from the first implementation.
 
 ## Concrete requirements
 
-Current consumers are:
+Current in-repository consumers are:
 
-- applications embedding the Go `agent` package
-- the reference `cmd/j` CLI
+- the reference `cmd/j-agent` CLI
 - the private JSONL queue used by the reference process
+
+The DeepSeek and Ollama adapters independently validate the model seam.
+Applications embedding the Go `agent` package are the intended external
+audience, but external production consumers have not yet been verified.
 
 The runtime must:
 
@@ -41,6 +44,16 @@ The runtime must:
 - cancellation through `context.Context`
 - defensive conversation snapshots
 - FIFO task admission and one terminal task state
+
+One `Agent` owns one serialized conversation. A run commits its user message
+before model execution and then commits only completed, accepted model/tool
+messages. An invalid or over-limit model response is not committed. A tool
+round means one accepted model response containing one or more tool calls,
+followed by execution of those calls; the final answer receives its own model
+turn after the last permitted tool round.
+
+Per-run event handlers execute synchronously to preserve ordering. They may
+read `History`, but must not reenter `Run` or `Reset` on the same `Agent`.
 
 ### Replaceable policy
 
@@ -78,13 +91,13 @@ them today.
 
 ### Experimental wire contract
 
-`j-core` version `0.1` is a canonical stream for the reference process. It is
+`j-agent` version `0.1` is a canonical stream for the reference process. It is
 documented so downstream experiments are possible, but it is not yet a
 compatibility promise.
 
 ## Deliberately not generalized
 
-J does not define universal interfaces for:
+J-agent does not define universal interfaces for:
 
 - subagents
 - memory
@@ -99,6 +112,19 @@ J does not define universal interfaces for:
 
 These capabilities should be composed outside the core until multiple real
 implementations reveal a stable mechanism.
+
+## Relationship to J
+
+J-agent is an independently usable runtime kernel. A future `J` repository may
+compose J-agent with first-party projects such as J-tui and J-mem. Those
+projects demonstrate a default customization; they do not become mandatory
+runtime layers, and their planned existence does not justify interfaces before
+real integration work exposes an independent variation axis.
+
+J-tui and J-mem should initially consume the same experimental public seams as
+third-party embedders. A seam may be revised while experimental, and should
+become stable only after those implementations and at least one independent
+consumer validate the same semantics.
 
 ## J-Space boundary
 

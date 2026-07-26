@@ -1,6 +1,6 @@
-APP := j
+APP := j-agent
 BIN_DIR := bin
-ENTRY := ./cmd/j
+ENTRY := ./cmd/j-agent
 PROVIDER ?=
 MODEL ?=
 

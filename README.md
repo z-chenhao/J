@@ -1,13 +1,13 @@
-# J
+# J-agent
 
-J is a minimal, customizable agent runtime for Go.
+J-agent is a minimal, customizable agent runtime for Go.
 
-> Status: experimental. The public Go package and `j-core` JSONL protocol may
+> Status: experimental. The public Go package and `j-agent` JSONL protocol may
 > change before the first stable release.
 
 ## Mission
 
-J keeps only the mechanisms required to run a model/tool loop:
+J-agent keeps only the mechanisms required to run a model/tool loop:
 
 - ordered text, reasoning, and tool-call content
 - explicit model and tool adapter contracts
@@ -16,7 +16,15 @@ J keeps only the mechanisms required to run a model/tool loop:
 - conversation state
 - an optional FIFO task queue and typed JSONL event stream
 
-Everything else belongs in an adapter or product built on J.
+Everything else belongs in an adapter or product built on J-agent.
+
+## Relationship to J
+
+J-agent is the standalone runtime kernel. A future `J` repository may compose
+it with independent projects such as `J-tui` and `J-mem` to demonstrate one
+useful default agent. Those projects are examples and optional composition, not
+dependencies or features of J-agent. They should use the same public seams
+available to every other consumer.
 
 ## Non-goals
 
@@ -36,28 +44,28 @@ The core does not provide:
 
 ## Use Ollama
 
-J uses Ollama's native `/api/chat` protocol. Choose the model explicitly:
+J-agent uses Ollama's native `/api/chat` protocol. Choose the model explicitly:
 
 ```bash
-go run ./cmd/j \
+go run ./cmd/j-agent \
   --provider ollama \
   --model qwen3 \
   "Explain why small interfaces are useful."
 ```
 
-Set a custom endpoint with `--base-url` or `J_BASE_URL`. Enable or disable
+Set a custom endpoint with `--base-url` or `J_AGENT_BASE_URL`. Enable or disable
 thinking explicitly with `--thinking enabled` or `--thinking disabled`;
 `default` leaves the choice to Ollama.
 
 ## Use DeepSeek
 
-J uses DeepSeek's streaming Chat Completions protocol. The model name is
+J-agent uses DeepSeek's streaming Chat Completions protocol. The model name is
 deliberately required because provider model names and defaults can change.
 
 ```bash
 export DEEPSEEK_API_KEY='...'
 
-go run ./cmd/j \
+go run ./cmd/j-agent \
   --provider deepseek \
   --model deepseek-v4-pro \
   "Explain why small interfaces are useful."
@@ -65,11 +73,12 @@ go run ./cmd/j \
 
 The API key is read only from `DEEPSEEK_API_KEY`, not from a command-line flag.
 Provider, model, base URL, and thinking mode may also be supplied through
-`J_PROVIDER`, `J_MODEL`, `J_BASE_URL`, and `J_THINKING`. DeepSeek reasoning
+`J_AGENT_PROVIDER`, `J_AGENT_MODEL`, `J_AGENT_BASE_URL`, and
+`J_AGENT_THINKING`. DeepSeek reasoning
 effort is available as `--reasoning-effort high|max` or
-`J_REASONING_EFFORT`.
+`J_AGENT_REASONING_EFFORT`.
 
-## Embed J
+## Embed J-agent
 
 Use a checked-in adapter or implement the small `agent.Model` contract:
 
@@ -80,8 +89,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/z-chenhao/J/adapter/ollama"
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/adapter/ollama"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 func main() {
@@ -113,10 +122,10 @@ Run:
 ```bash
 printf '%s\n' \
   '{"id":"1","type":"submit","message":"hello"}' |
-  go run ./cmd/j --rpc --provider ollama --model qwen3
+  go run ./cmd/j-agent --rpc --provider ollama --model qwen3
 ```
 
-The experimental `j-core` protocol supports:
+The experimental `j-agent` protocol supports:
 
 - `submit`
 - `cancel`
@@ -142,7 +151,7 @@ make check
 adapter/deepseek/   DeepSeek protocol adapter
 adapter/ollama/     Ollama native protocol adapter
 agent/              experimental embeddable Go runtime
-cmd/j/              reference CLI and JSONL process
+cmd/j-agent/        reference CLI and JSONL process
 internal/runtime/   private queue and JSONL transport
 docs/               architecture and protocol contracts
 research/           external model and harness research
@@ -150,7 +159,7 @@ research/           external model and harness research
 
 ## Security
 
-J executes only tools explicitly supplied by the embedding application. The
+J-agent executes only tools explicitly supplied by the embedding application. The
 core does not ship an unrestricted shell tool. Tool implementers remain
 responsible for authorization, sandboxing, input validation, and output limits.
 

@@ -3,12 +3,13 @@ package deepseek
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 func TestCompleteStreamsToolCallAndUsage(t *testing.T) {
@@ -130,6 +131,35 @@ func TestCompleteReportsBoundedHTTPError(t *testing.T) {
 	_, err = model.Complete(context.Background(), agent.ModelRequest{}, nil)
 	if err == nil || !strings.Contains(err.Error(), "HTTP 400") || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("error=%v", err)
+	}
+	var statusError *HTTPError
+	if !errors.As(err, &statusError) || statusError.StatusCode != http.StatusBadRequest ||
+		statusError.Message != "bad request" {
+		t.Fatalf("typed HTTP error=%#v", statusError)
+	}
+}
+
+func TestNewValidatesAndJoinsBaseURL(t *testing.T) {
+	model, err := New(Config{
+		APIKey:  "secret",
+		Model:   "deepseek-v4-pro",
+		BaseURL: "https://deepseek.example/gateway/",
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	if model.endpoint != "https://deepseek.example/gateway/chat/completions" {
+		t.Fatalf("endpoint=%q", model.endpoint)
+	}
+	for _, baseURL := range []string{
+		"ftp://deepseek.example",
+		"https://user:secret@deepseek.example",
+		"https://deepseek.example?region=cn",
+		"https://deepseek.example#fragment",
+	} {
+		if _, err := New(Config{APIKey: "secret", Model: "model", BaseURL: baseURL}); err == nil {
+			t.Fatalf("New() accepted base URL %q", baseURL)
+		}
 	}
 }
 

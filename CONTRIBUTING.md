@@ -1,6 +1,6 @@
-# Contributing to J
+# Contributing to J-agent
 
-J favors small, complete changes over speculative framework growth.
+J-agent favors small, complete changes over speculative framework growth.
 
 ## Before proposing a change
 
@@ -27,7 +27,7 @@ Run:
 make check
 ```
 
-Changes to public agent behavior or `j-core` require executable contract tests.
+Changes to public agent behavior or `j-agent` require executable contract tests.
 Use `gofmt`; do not commit generated binaries, provider credentials, model
 weights, fitted lenses, or experiment datasets.
 

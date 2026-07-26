@@ -2,9 +2,9 @@
 
 > Build systems that outlive their implementations.
 
-# Mission (J)
+# Mission (J-agent)
 
-J is a **minimal, customizable agent runtime**.
+J-agent is a **minimal, customizable agent runtime**.
 
 - Keep the kernel small: command parsing, task lifecycle, queueing, and a versioned canonical event protocol.
 - Make extension easy: expose a clear adapter boundary for model, tools, transport, and richer command semantics.
@@ -20,6 +20,10 @@ Core invariants are always explicit. Experimental contracts are labeled as
 such and become stable only after real consumers validate them. Extra
 capabilities belong outside the core unless they directly reduce integration
 cost.
+
+The future `J` repository may compose J-agent with independent projects such as
+J-tui and J-mem. Those projects are first-party examples, not J-agent
+dependencies and not justification for speculative runtime interfaces.
 
 J-Space and Jacobian-lens work belongs under `research/` and is not a runtime
 dependency. It may inform model harness defaults only after reproducible

@@ -1,8 +1,8 @@
 # Reference runtime
 
-This package implements J's experimental JSONL reference transport. It remains
-under `internal/` because process transport and queue policy have not earned a
-stable Go API.
+This package implements J-agent's experimental JSONL reference transport. It
+remains under `internal/` because process transport and queue policy have not
+earned a stable Go API.
 
 Supported commands:
 
@@ -15,7 +15,7 @@ Supported commands:
 
 There are no command aliases, protocol-selection environment variables, or
 advertised placeholders for unimplemented features. Downstream systems may
-translate the single `j-core` event stream outside J.
+translate the single `j-agent` event stream outside J-agent.
 
 The stream reports model deltas, normalized usage and stop reason, first-delta
 and total latency, tool duration, and task queue/run duration. It does not

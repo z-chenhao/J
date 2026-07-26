@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 // RunCLI runs the reference CLI around an injected agent.
@@ -34,17 +34,21 @@ func RunCLI(
 
 // RunRPC runs the experimental JSONL reference transport around an injected
 // agent.
-func RunRPC(runner *agent.Agent, in io.Reader, out io.Writer) error {
+func RunRPC(ctx context.Context, runner *agent.Agent, in io.Reader, out io.Writer) error {
+	if ctx == nil {
+		return errors.New("context is required")
+	}
 	rt, err := New(runner, out)
 	if err != nil {
 		return err
 	}
+	rt.ctx = ctx
 	return RunLoop(in, rt)
 }
 
 func runInteractive(ctx context.Context, runner *agent.Agent, in io.Reader, out, errOut io.Writer) error {
 	if out != nil {
-		fmt.Fprintln(out, "J started. Empty lines are skipped; type exit to quit.")
+		fmt.Fprintln(out, "J-agent started. Empty lines are skipped; type exit to quit.")
 	}
 	scanner := bufio.NewScanner(in)
 	for {

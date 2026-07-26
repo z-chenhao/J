@@ -1,6 +1,6 @@
 # Model protocol boundary
 
-This note records the evidence used to define J's experimental model seam. The
+This note records the evidence used to define J-agent's experimental model seam. The
 source snapshot was taken on 2026-07-26.
 
 ## Compared systems
@@ -69,7 +69,7 @@ The three implementations independently justify these concepts:
 7. provider-reported token usage;
 8. model/provider identity for diagnostics and replay.
 
-J exposes exactly this subset through `agent.Message`, `agent.Content`,
+J-agent exposes exactly this subset through `agent.Message`, `agent.Content`,
 `agent.ToolCall`, `agent.ModelDelta`, `agent.ModelResponse`, and
 `agent.ModelObservation`.
 
@@ -78,11 +78,11 @@ model/tool loop contract shared by the current consumers.
 
 ## JSON Schema boundary
 
-`agent.ToolSpec.InputSchema` must contain a valid JSON object. J does not claim
+`agent.ToolSpec.InputSchema` must contain a valid JSON object. J-agent does not claim
 to implement or validate every JSON Schema draft or provider subset.
 
 - DeepSeek accepts function `parameters` using JSON Schema semantics. Its
-  strict mode is a beta API with a narrower supported subset, so J does not
+  strict mode is a beta API with a narrower supported subset, so J-agent does not
   enable strict mode or promise that every schema will be accepted.
 - Ollama's native chat API accepts the same function/parameters shape, but
   actual enforcement still depends on the selected local model.
@@ -100,7 +100,7 @@ Provider sources:
 - [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling)
 - [Ollama usage metrics](https://docs.ollama.com/api/usage)
 
-| J concept | DeepSeek | Ollama |
+| J-agent concept | DeepSeek | Ollama |
 | --- | --- | --- |
 | endpoint | `/chat/completions` | `/api/chat` |
 | stream framing | SSE `data:` records | newline-delimited JSON |
@@ -116,7 +116,7 @@ provider-specific conditionals in the agent loop.
 
 ## Deliberately not generalized
 
-J does not currently standardize:
+J-agent does not currently standardize:
 
 - image, audio, or file content;
 - provider-specific signatures or opaque encrypted reasoning state;
@@ -127,12 +127,12 @@ J does not currently standardize:
 - approvals, permissions, sessions, trees, subagents, plugins, or hooks;
 - model capability discovery.
 
-These are either absent from current J consumers or belong to product policy.
+These are either absent from current J-agent consumers or belong to product policy.
 They can be added reversibly after a real second use case proves the shared
 semantics.
 
 ## Stability
 
-The model seam and `j-core` protocol remain experimental. Two adapters validate
+The model seam and `j-agent` protocol remain experimental. Two adapters validate
 that the current boundary is useful; external consumers and production
 experience are still required before a compatibility promise is justified.

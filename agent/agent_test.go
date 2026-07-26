@@ -47,6 +47,7 @@ func (m *scriptedModel) Complete(
 
 type collectTool struct {
 	arguments map[string]string
+	calls     int
 }
 
 func (t *collectTool) Spec() ToolSpec {
@@ -58,6 +59,7 @@ func (t *collectTool) Spec() ToolSpec {
 }
 
 func (t *collectTool) Call(_ context.Context, arguments json.RawMessage) (string, error) {
+	t.calls++
 	if err := json.Unmarshal(arguments, &t.arguments); err != nil {
 		return "", err
 	}
@@ -246,16 +248,61 @@ func TestRunRejectsInvalidToolCallIdentity(t *testing.T) {
 	}
 }
 
-func TestToolRoundLimitIsExplicit(t *testing.T) {
+func TestToolRoundLimitAllowsFinalAnswer(t *testing.T) {
 	model := &scriptedModel{outputs: []ModelResponse{
-		response(toolMessage("call-1", "missing", `{}`), StopReasonToolCalls),
+		response(toolMessage("call-1", "collect", `{"text":"first"}`), StopReasonToolCalls),
+		response(TextMessage(RoleAssistant, "done"), StopReasonStop),
 	}}
-	runner, err := New(model, WithMaxToolRounds(1))
+	tool := &collectTool{}
+	runner, err := New(model, WithTools(tool), WithMaxToolRounds(1))
 	if err != nil {
 		t.Fatalf("New() error: %v", err)
 	}
-	if _, err := runner.Run(context.Background(), "hello", nil); !errors.Is(err, ErrToolRoundLimit) {
+	result, err := runner.Run(context.Background(), "hello", nil)
+	if err != nil {
+		t.Fatalf("Run() error=%v", err)
+	}
+	if result.Message.Text() != "done" || result.Turns != 2 || tool.calls != 1 {
+		t.Fatalf("result=%#v, tool calls=%d", result, tool.calls)
+	}
+}
+
+func TestToolRoundLimitRejectsNextToolWithoutPersistingOrExecutingIt(t *testing.T) {
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(toolMessage("call-1", "collect", `{"text":"first"}`), StopReasonToolCalls),
+		response(toolMessage("call-2", "collect", `{"text":"second"}`), StopReasonToolCalls),
+	}}
+	tool := &collectTool{}
+	runner, err := New(model, WithTools(tool), WithMaxToolRounds(1))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	var events []EventType
+	result, err := runner.Run(context.Background(), "hello", func(event Event) {
+		events = append(events, event.Type)
+	})
+	if !errors.Is(err, ErrToolRoundLimit) {
 		t.Fatalf("Run() error=%v, want ErrToolRoundLimit", err)
+	}
+	if tool.calls != 1 {
+		t.Fatalf("tool calls=%d, want 1", tool.calls)
+	}
+	history := runner.History()
+	if len(history) != 3 || history[2].Role != RoleTool || history[2].ToolCallID != "call-1" {
+		t.Fatalf("history contains over-limit tool call: %#v", history)
+	}
+	if result.Turns != 1 {
+		t.Fatalf("completed turns=%d, want 1", result.Turns)
+	}
+	wantTail := []EventType{EventMessageFailed, EventTurnFailed, EventAgentFailed}
+	if len(events) < len(wantTail) {
+		t.Fatalf("events=%v", events)
+	}
+	for index, want := range wantTail {
+		got := events[len(events)-len(wantTail)+index]
+		if got != want {
+			t.Fatalf("terminal events=%v, want tail %v", events, wantTail)
+		}
 	}
 }
 

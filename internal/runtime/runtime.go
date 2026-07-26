@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 type runner interface {
@@ -65,10 +65,11 @@ func (t taskState) snapshot() taskSnapshot {
 }
 
 // Runtime owns the reference JSONL task queue. It is intentionally internal;
-// embedders customize J through the public agent package.
+// embedders customize J-agent through the public agent package.
 type Runtime struct {
 	runner runner
 	out    io.Writer
+	ctx    context.Context
 
 	mu              sync.Mutex
 	sessionID       string
@@ -103,6 +104,7 @@ func New(runner runner, out io.Writer) (*Runtime, error) {
 	return &Runtime{
 		runner:    runner,
 		out:       out,
+		ctx:       context.Background(),
 		sessionID: "session-1",
 		tasks:     make(map[string]*taskState),
 	}, nil
@@ -224,7 +226,7 @@ func (r *Runtime) runNext() bool {
 	task := r.tasks[taskID]
 	r.runCounter++
 	runID := fmt.Sprintf("run-%06d", r.runCounter)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(r.ctx)
 	now := time.Now()
 	task.RunID = runID
 	task.Status = taskRunning
@@ -258,11 +260,6 @@ func (r *Runtime) runNext() bool {
 	}
 	task.UpdatedAt = time.Now()
 	task.CompletedAt = task.UpdatedAt
-	r.activeTaskID = ""
-	r.activeRunID = ""
-	r.activeTurnID = ""
-	r.activeMessageID = ""
-	r.cancelActive = nil
 	r.mu.Unlock()
 
 	switch finalStatus {
@@ -273,6 +270,14 @@ func (r *Runtime) runNext() bool {
 	case taskFailed:
 		r.emitTaskEvent("task.failed", taskID, finalStatus, finalError)
 	}
+
+	r.mu.Lock()
+	r.activeTaskID = ""
+	r.activeRunID = ""
+	r.activeTurnID = ""
+	r.activeMessageID = ""
+	r.cancelActive = nil
+	r.mu.Unlock()
 	return true
 }
 
@@ -397,10 +402,11 @@ func (r *Runtime) state() stateSnapshot {
 
 func (r *Runtime) reset() bool {
 	r.mu.Lock()
-	if r.activeTaskID != "" || len(r.queue) != 0 {
-		r.mu.Unlock()
+	defer r.mu.Unlock()
+	if r.workerRunning || r.activeTaskID != "" || len(r.queue) != 0 {
 		return false
 	}
+	r.runner.Reset()
 	r.tasks = make(map[string]*taskState)
 	r.taskCounter = 0
 	r.runCounter = 0
@@ -408,8 +414,6 @@ func (r *Runtime) reset() bool {
 	r.messageCounter = 0
 	r.activeMessageID = ""
 	r.sessionID = fmt.Sprintf("session-%d", time.Now().UnixNano())
-	r.mu.Unlock()
-	r.runner.Reset()
 	return true
 }
 

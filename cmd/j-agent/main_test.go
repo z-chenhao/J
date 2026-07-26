@@ -1,13 +1,15 @@
 package main
 
 import (
+	"errors"
+	"flag"
 	"strings"
 	"testing"
 )
 
 func TestParseConfigRequiresExplicitProviderAndModel(t *testing.T) {
-	t.Setenv("J_PROVIDER", "")
-	t.Setenv("J_MODEL", "")
+	t.Setenv("J_AGENT_PROVIDER", "")
+	t.Setenv("J_AGENT_MODEL", "")
 	if _, err := parseConfig(nil); err == nil || !strings.Contains(err.Error(), "provider") {
 		t.Fatalf("error=%v", err)
 	}
@@ -17,9 +19,15 @@ func TestParseConfigRequiresExplicitProviderAndModel(t *testing.T) {
 	}
 }
 
+func TestParseConfigReturnsHelpWithoutValidation(t *testing.T) {
+	if _, err := parseConfig([]string{"--help"}); !errors.Is(err, flag.ErrHelp) {
+		t.Fatalf("parseConfig() error=%v, want flag.ErrHelp", err)
+	}
+}
+
 func TestParseConfigUsesTypedThinkingMode(t *testing.T) {
-	t.Setenv("J_PROVIDER", "")
-	t.Setenv("J_MODEL", "")
+	t.Setenv("J_AGENT_PROVIDER", "")
+	t.Setenv("J_AGENT_MODEL", "")
 	config, err := parseConfig([]string{
 		"--provider", "ollama",
 		"--model", "qwen3",
@@ -50,8 +58,8 @@ func TestBuildDeepSeekModelRequiresEnvironmentCredential(t *testing.T) {
 }
 
 func TestParseConfigRejectsDeepSeekOnlyEffortForOllama(t *testing.T) {
-	t.Setenv("J_PROVIDER", "")
-	t.Setenv("J_MODEL", "")
+	t.Setenv("J_AGENT_PROVIDER", "")
+	t.Setenv("J_AGENT_MODEL", "")
 	_, err := parseConfig([]string{
 		"--provider", "ollama",
 		"--model", "qwen3",

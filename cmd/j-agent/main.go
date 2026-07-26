@@ -6,12 +6,14 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
-	"github.com/z-chenhao/J/adapter/deepseek"
-	"github.com/z-chenhao/J/adapter/ollama"
-	"github.com/z-chenhao/J/agent"
-	"github.com/z-chenhao/J/internal/runtime"
+	"github.com/z-chenhao/J-agent/adapter/deepseek"
+	"github.com/z-chenhao/J-agent/adapter/ollama"
+	"github.com/z-chenhao/J-agent/agent"
+	"github.com/z-chenhao/J-agent/internal/runtime"
 )
 
 type config struct {
@@ -25,7 +27,13 @@ type config struct {
 }
 
 func main() {
-	if err := run(context.Background(), os.Args[1:]); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		_ = os.Stdin.Close()
+	}()
+	if err := run(ctx, os.Args[1:]); err != nil && !errors.Is(err, flag.ErrHelp) {
 		_, _ = fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
@@ -48,7 +56,7 @@ func run(ctx context.Context, args []string) error {
 		if len(config.prompt) > 0 {
 			return errors.New("--rpc does not accept a prompt")
 		}
-		return runtime.RunRPC(runner, os.Stdin, os.Stdout)
+		return runtime.RunRPC(ctx, runner, os.Stdin, os.Stdout)
 	}
 	return runtime.RunCLI(ctx, runner, os.Stdin, os.Stdout, os.Stderr, config.prompt...)
 }
@@ -57,14 +65,14 @@ func parseConfig(args []string) (config, error) {
 	flags := flag.NewFlagSet("j", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	var config config
-	flags.StringVar(&config.provider, "provider", env("J_PROVIDER"), "model provider: deepseek or ollama")
-	flags.StringVar(&config.model, "model", env("J_MODEL"), "provider model name")
-	flags.StringVar(&config.baseURL, "base-url", env("J_BASE_URL"), "provider API base URL")
-	flags.StringVar(&config.thinking, "thinking", env("J_THINKING"), "thinking mode: default, enabled, or disabled")
+	flags.StringVar(&config.provider, "provider", env("J_AGENT_PROVIDER"), "model provider: deepseek or ollama")
+	flags.StringVar(&config.model, "model", env("J_AGENT_MODEL"), "provider model name")
+	flags.StringVar(&config.baseURL, "base-url", env("J_AGENT_BASE_URL"), "provider API base URL")
+	flags.StringVar(&config.thinking, "thinking", env("J_AGENT_THINKING"), "thinking mode: default, enabled, or disabled")
 	flags.StringVar(
 		&config.reasoningEffort,
 		"reasoning-effort",
-		env("J_REASONING_EFFORT"),
+		env("J_AGENT_REASONING_EFFORT"),
 		"DeepSeek reasoning effort: default, high, or max",
 	)
 	flags.BoolVar(&config.rpc, "rpc", false, "run the JSONL transport")
@@ -84,10 +92,10 @@ func parseConfig(args []string) (config, error) {
 	}
 	config.prompt = flags.Args()
 	if config.provider == "" {
-		return config, errors.New("--provider or J_PROVIDER is required")
+		return config, errors.New("--provider or J_AGENT_PROVIDER is required")
 	}
 	if config.model == "" {
-		return config, errors.New("--model or J_MODEL is required")
+		return config, errors.New("--model or J_AGENT_MODEL is required")
 	}
 	switch config.thinking {
 	case "default", "enabled", "disabled":

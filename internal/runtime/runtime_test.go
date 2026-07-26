@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 type fixedModel struct {
@@ -92,6 +94,30 @@ func decodeLines(t *testing.T, output string) []map[string]any {
 	return decoded
 }
 
+func findRecord(t *testing.T, records []map[string]any, eventType string) map[string]any {
+	t.Helper()
+	for _, record := range records {
+		if record["type"] == eventType {
+			return record
+		}
+	}
+	t.Fatalf("missing record type %q: %#v", eventType, records)
+	return nil
+}
+
+func assertExactKeys(t *testing.T, value map[string]any, expected ...string) {
+	t.Helper()
+	actual := make([]string, 0, len(value))
+	for key := range value {
+		actual = append(actual, key)
+	}
+	sort.Strings(actual)
+	sort.Strings(expected)
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("JSON keys=%v, want %v: %#v", actual, expected, value)
+	}
+}
+
 func TestRunLoopSubmitSettlesWithoutDeadlock(t *testing.T) {
 	var out bytes.Buffer
 	rt := newTestRuntime(t, fixedModel{content: "done"}, &out)
@@ -116,6 +142,14 @@ func TestRunLoopSubmitSettlesWithoutDeadlock(t *testing.T) {
 	}
 	if records[0]["type"] != "response" || records[0]["success"] != true {
 		t.Fatalf("first record is not accepted response: %#v", records[0])
+	}
+	assertExactKeys(
+		t,
+		records[0],
+		"command", "data", "id", "protocol", "protocolVersion", "success", "type",
+	)
+	if records[0]["protocol"] != protocolName || records[0]["protocolVersion"] != protocolVersion {
+		t.Fatalf("protocol identity=%#v", records[0])
 	}
 
 	terminalCount := 0
@@ -145,6 +179,71 @@ func TestRunLoopSubmitSettlesWithoutDeadlock(t *testing.T) {
 	if terminalCount != 1 {
 		t.Fatalf("terminal task events=%d, want 1: %#v", terminalCount, records)
 	}
+	terminal := findRecord(t, records, "task.completed")
+	assertExactKeys(
+		t,
+		terminal,
+		"protocol", "protocolVersion", "runId", "sequence", "sessionId",
+		"status", "taskId", "timestamp", "type",
+	)
+}
+
+type toolEventRunner struct{}
+
+func (toolEventRunner) Run(
+	_ context.Context,
+	_ string,
+	handler agent.EventHandler,
+) (agent.RunResult, error) {
+	call := agent.ToolCall{
+		ID:        "call-1",
+		Name:      "weather",
+		Arguments: json.RawMessage(`{"city":"HZ"}`),
+	}
+	message := agent.TextMessage(agent.RoleAssistant, "sunny")
+	handler(agent.Event{Type: agent.EventAgentStarted})
+	handler(agent.Event{Type: agent.EventTurnStarted})
+	handler(agent.Event{Type: agent.EventMessageStarted})
+	handler(agent.Event{Type: agent.EventMessageCompleted, Message: &message})
+	handler(agent.Event{Type: agent.EventToolStarted, ToolCall: &call})
+	handler(agent.Event{
+		Type:     agent.EventToolCompleted,
+		ToolCall: &call,
+		Output:   "sunny",
+		Duration: time.Millisecond,
+	})
+	handler(agent.Event{Type: agent.EventTurnCompleted})
+	handler(agent.Event{Type: agent.EventAgentCompleted})
+	return agent.RunResult{Message: message, Turns: 1}, nil
+}
+
+func (toolEventRunner) History() []agent.Message {
+	return nil
+}
+
+func (toolEventRunner) Reset() {}
+
+func TestProtocolToolEventContract(t *testing.T) {
+	var out bytes.Buffer
+	rt, err := New(toolEventRunner{}, &out)
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	rt.Handle(command{ID: "1", Type: commandSubmit, Message: "weather"})
+	rt.Wait()
+
+	record := findRecord(t, decodeLines(t, out.String()), string(agent.EventToolCompleted))
+	assertExactKeys(
+		t,
+		record,
+		"durationMs", "output", "protocol", "protocolVersion", "runId",
+		"sequence", "sessionId", "taskId", "toolCall", "turnId", "timestamp", "type",
+	)
+	toolCall, ok := record["toolCall"].(map[string]any)
+	if !ok {
+		t.Fatalf("toolCall=%#v", record["toolCall"])
+	}
+	assertExactKeys(t, toolCall, "arguments", "id", "name")
 }
 
 func TestQueueIsFIFOAndQueuedTaskCanBeCanceled(t *testing.T) {
@@ -199,6 +298,13 @@ func TestCancelActiveTaskProducesOneTerminalEvent(t *testing.T) {
 	if terminalCount != 1 {
 		t.Fatalf("task.canceled events=%d, want 1: %#v", terminalCount, records)
 	}
+	terminal := findRecord(t, records, "task.canceled")
+	assertExactKeys(
+		t,
+		terminal,
+		"protocol", "protocolVersion", "runId", "sequence", "sessionId",
+		"status", "taskId", "timestamp", "type",
+	)
 }
 
 func TestStateContainsOnlyObservedRuntimeFacts(t *testing.T) {
@@ -246,6 +352,12 @@ func TestHandleReadCommandsAndIdleReset(t *testing.T) {
 	if len(rt.runner.History()) != 0 {
 		t.Fatal("reset did not clear history")
 	}
+	reset := findRecord(t, records, "session.reset")
+	assertExactKeys(
+		t,
+		reset,
+		"protocol", "protocolVersion", "sequence", "sessionId", "timestamp", "type",
+	)
 }
 
 func TestTaskSnapshotReportsRunDiagnostics(t *testing.T) {
@@ -312,6 +424,57 @@ func TestResetIsRejectedWhileTaskIsRunning(t *testing.T) {
 		return
 	}
 	t.Fatal("missing reset response")
+}
+
+type terminalBlockingWriter struct {
+	bytes.Buffer
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (writer *terminalBlockingWriter) Write(data []byte) (int, error) {
+	if bytes.Contains(data, []byte(`"type":"task.completed"`)) {
+		writer.once.Do(func() { close(writer.reached) })
+		<-writer.release
+	}
+	return writer.Buffer.Write(data)
+}
+
+func TestResetIsRejectedUntilTerminalEventIsWritten(t *testing.T) {
+	out := &terminalBlockingWriter{
+		reached: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	rt := newTestRuntime(t, fixedModel{content: "done"}, &out.Buffer)
+	rt.out = out
+	rt.Handle(command{ID: "1", Type: commandSubmit, Message: "hello"})
+
+	select {
+	case <-out.reached:
+	case <-time.After(time.Second):
+		t.Fatal("terminal event did not reach writer")
+	}
+	if rt.reset() {
+		t.Fatal("reset succeeded while terminal event was pending")
+	}
+	close(out.release)
+	rt.Wait()
+
+	records := decodeLines(t, out.String())
+	for _, record := range records {
+		if record["type"] != "task.completed" {
+			continue
+		}
+		if record["sessionId"] != "session-1" || record["runId"] != "run-000001" {
+			t.Fatalf("terminal event lost lifecycle identity: %#v", record)
+		}
+		if !rt.reset() {
+			t.Fatal("reset was rejected after worker settled")
+		}
+		return
+	}
+	t.Fatal("missing task.completed event")
 }
 
 func TestCancelTerminalTaskIsRejected(t *testing.T) {

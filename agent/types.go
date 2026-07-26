@@ -210,5 +210,7 @@ type Event struct {
 	Error    string            `json:"error,omitempty"`
 }
 
-// EventHandler observes one run without becoming shared Agent state.
+// EventHandler observes one run without becoming shared Agent state. A handler
+// may call History, but must not call Run or Reset on the same Agent because
+// handlers run synchronously while that Agent's run is active.
 type EventHandler func(Event)

@@ -1,4 +1,4 @@
-# `j-core` protocol 0.1
+# `j-agent` protocol 0.1
 
 The reference process reads one JSON command per line from stdin and writes one
 JSON response or event per line to stdout.
@@ -18,7 +18,7 @@ The response is emitted before task events:
 ```json
 {
   "type":"response",
-  "protocol":"j-core",
+  "protocol":"j-agent",
   "protocolVersion":"0.1",
   "id":"1",
   "command":"submit",
@@ -165,7 +165,7 @@ Failed command responses use:
 ```json
 {
   "type":"response",
-  "protocol":"j-core",
+  "protocol":"j-agent",
   "protocolVersion":"0.1",
   "command":"submit",
   "success":false,

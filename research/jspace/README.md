@@ -1,6 +1,6 @@
 # J-Space model and harness research
 
-This directory defines how J uses J-Space research to compare models and agent
+This directory defines how J-agent uses J-Space research to compare models and agent
 harness recipes. It does not add J-Space to the runtime.
 
 ## What J-Space is
@@ -20,7 +20,7 @@ needed to claim a J-lens measurement.
 
 For a fixed model and task set:
 
-> Which J harness recipe maximizes task success while minimizing turns, tokens,
+> Which J-agent harness recipe maximizes task success while minimizing turns, tokens,
 > latency, and unsafe or invalid tool actions?
 
 J-lens observations are diagnostic evidence about internal representations.
@@ -29,7 +29,7 @@ They are not a replacement for behavioral evaluation.
 ## Boundary
 
 Research dependencies, model weights, fitted lenses, datasets, and GPU-specific
-code stay outside J's Go module. This avoids:
+code stay outside J-agent's Go module. This avoids:
 
 - forcing Python or ML dependencies on runtime users
 - coupling J to one interpretability implementation
@@ -37,7 +37,7 @@ code stay outside J's Go module. This avoids:
 - presenting an unvalidated harness as framework semantics
 
 Research artifacts should live in a separate experiment checkout or an
-ignored local directory and refer back to a J commit.
+ignored local directory and refer back to a J-agent commit.
 
 ## Minimum experiment
 
@@ -54,7 +54,7 @@ Hold constant:
 
 Record:
 
-- J commit
+- J-agent commit
 - model and lens identifiers
 - harness text and context assembly
 - tool schema encoding
@@ -76,7 +76,7 @@ Each axis must be tested independently before combinations:
 5. explicit reflection or planning instructions
 6. error feedback presented after invalid tool calls
 
-These are hypotheses, not J defaults.
+These are hypotheses, not J-agent defaults.
 
 ## J-lens observations
 

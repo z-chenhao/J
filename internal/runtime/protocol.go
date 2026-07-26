@@ -3,11 +3,11 @@ package runtime
 import (
 	"time"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 const (
-	protocolName    = "j-core"
+	protocolName    = "j-agent"
 	protocolVersion = "0.1"
 )
 

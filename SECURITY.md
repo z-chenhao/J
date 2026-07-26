@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-J has not made a stable release. Security fixes are applied to the latest
+J-agent has not made a stable release. Security fixes are applied to the latest
 commit on `main`.
 
 ## Reporting a vulnerability
@@ -19,6 +19,6 @@ Include:
 
 ## Trust boundary
 
-J does not sandbox tools. Embedders must authorize tools, validate arguments,
+J-agent does not sandbox tools. Embedders must authorize tools, validate arguments,
 bound outputs, protect credentials, and isolate dangerous execution. The
 reference binary does not include a shell tool.

@@ -13,7 +13,8 @@ import (
 var (
 	// ErrEmptyInput is returned when a run has no user content.
 	ErrEmptyInput = errors.New("input is empty")
-	// ErrToolRoundLimit is returned when a model never produces a final answer.
+	// ErrToolRoundLimit is returned when a model requests another tool after the
+	// configured number of tool rounds has completed.
 	ErrToolRoundLimit = errors.New("tool round limit exceeded")
 	// ErrEmptyModelOutput is returned when a model produces neither text nor tools.
 	ErrEmptyModelOutput = errors.New("model returned an empty assistant message")
@@ -46,7 +47,8 @@ func WithSystemPrompt(prompt string) Option {
 	})
 }
 
-// WithMaxToolRounds limits consecutive model turns that request tools.
+// WithMaxToolRounds limits completed model/tool rounds. A final model turn is
+// still allowed after the last permitted tool round.
 func WithMaxToolRounds(rounds int) Option {
 	return optionFunc(func(cfg *config) error {
 		if rounds < 1 {
@@ -130,7 +132,8 @@ func New(model Model, options ...Option) (*Agent, error) {
 }
 
 // Run appends one user message and advances the conversation until the model
-// returns a final assistant message or the tool-round limit is reached.
+// returns a final assistant message or requests a tool beyond the configured
+// tool-round limit.
 func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (RunResult, error) {
 	input = strings.TrimSpace(input)
 	if input == "" {
@@ -152,7 +155,8 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Ru
 	emit(handler, Event{Type: EventAgentStarted})
 
 	var result RunResult
-	for round := 0; round < a.maxToolRounds; round++ {
+	toolRounds := 0
+	for {
 		if err := ctx.Err(); err != nil {
 			emit(handler, Event{Type: EventAgentFailed, Error: err.Error()})
 			return result, err
@@ -224,6 +228,20 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Ru
 			emit(handler, Event{Type: EventAgentFailed, Error: ErrEmptyModelOutput.Error()})
 			return result, ErrEmptyModelOutput
 		}
+		if len(calls) > 0 && toolRounds >= a.maxToolRounds {
+			emit(handler, Event{
+				Type:     EventMessageFailed,
+				Duration: modelDuration,
+				Error:    ErrToolRoundLimit.Error(),
+			})
+			emit(handler, Event{
+				Type:     EventTurnFailed,
+				Duration: modelDuration,
+				Error:    ErrToolRoundLimit.Error(),
+			})
+			emit(handler, Event{Type: EventAgentFailed, Error: ErrToolRoundLimit.Error()})
+			return result, ErrToolRoundLimit
+		}
 
 		messages = append(messages, output)
 		a.storeHistory(messages)
@@ -279,15 +297,13 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Ru
 			}
 			emit(handler, event)
 		}
+		toolRounds++
 		emit(handler, Event{
 			Type:     EventTurnCompleted,
 			Model:    &observation,
 			Duration: modelDuration,
 		})
 	}
-
-	emit(handler, Event{Type: EventAgentFailed, Error: ErrToolRoundLimit.Error()})
-	return result, ErrToolRoundLimit
 }
 
 func (a *Agent) executeTool(ctx context.Context, call ToolCall) (string, error) {

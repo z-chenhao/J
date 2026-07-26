@@ -3,12 +3,13 @@ package ollama
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
 
-	"github.com/z-chenhao/J/agent"
+	"github.com/z-chenhao/J-agent/agent"
 )
 
 func TestCompleteStreamsToolCallAndUsage(t *testing.T) {
@@ -110,5 +111,45 @@ func TestRequestPreservesThinkingAndToolName(t *testing.T) {
 		*payload.Messages[0].ToolCalls[0].Function.Index != 0 ||
 		payload.Messages[1].ToolName != "weather" {
 		t.Fatalf("payload=%#v", payload.Messages)
+	}
+}
+
+func TestCompleteReturnsTypedHTTPError(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(http.StatusServiceUnavailable, "not ready"), nil
+	})}
+	model, err := New(Config{
+		Model:      "qwen3",
+		BaseURL:    "http://ollama.example",
+		HTTPClient: client,
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	_, err = model.Complete(context.Background(), agent.ModelRequest{}, nil)
+	var statusError *HTTPError
+	if !errors.As(err, &statusError) || statusError.StatusCode != http.StatusServiceUnavailable ||
+		statusError.Message != "not ready" {
+		t.Fatalf("typed HTTP error=%#v, raw=%v", statusError, err)
+	}
+}
+
+func TestNewValidatesAndJoinsBaseURL(t *testing.T) {
+	model, err := New(Config{Model: "qwen3", BaseURL: "http://ollama.example/gateway/"})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	if model.endpoint != "http://ollama.example/gateway/api/chat" {
+		t.Fatalf("endpoint=%q", model.endpoint)
+	}
+	for _, baseURL := range []string{
+		"file://ollama.example",
+		"http://user:secret@ollama.example",
+		"http://ollama.example?node=1",
+		"http://ollama.example#fragment",
+	} {
+		if _, err := New(Config{Model: "qwen3", BaseURL: baseURL}); err == nil {
+			t.Fatalf("New() accepted base URL %q", baseURL)
+		}
 	}
 }
