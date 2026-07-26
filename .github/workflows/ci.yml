@@ -14,20 +14,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version-file: J-agent/go.mod
+          go-version: 1.26.x
+          check-latest: true
           cache: false
-      - name: Formatting
-        working-directory: J-agent
-        run: test -z "$(gofmt -l .)"
-      - name: Vet
-        working-directory: J-agent
-        run: go vet ./...
-      - name: Test
-        working-directory: J-agent
-        run: go test ./...
-      - name: Race detector
-        working-directory: J-agent
-        run: go test -race ./...
+      - name: Check
+        run: make check
+      - name: Vulnerability scan
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          (cd J-agent && govulncheck ./...)
+          (cd J-tui && govulncheck ./...)
+
+  container:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Build container
+        run: make image

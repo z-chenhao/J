@@ -1,0 +1,39 @@
+name: Design proposal
+description: Propose a new contract or significant architecture change
+title: "design: "
+body:
+  - type: textarea
+    id: requirement
+    attributes:
+      label: Concrete requirement
+      description: What real behavior or integration is currently blocked?
+    validations:
+      required: true
+  - type: textarea
+    id: consumer
+    attributes:
+      label: Current consumer and evidence
+      description: Name the real consumer and link or describe the failing integration.
+    validations:
+      required: true
+  - type: textarea
+    id: existing_seams
+    attributes:
+      label: Existing seams tried
+      description: Explain why Model, Tool, EventHandler, or History/WithHistory is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: narrow_design
+    attributes:
+      label: Narrowest reversible design
+      description: Separate invariant mechanism from policy and defaults.
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Deliberately not generalized
+      description: State what remains private, experimental, or unsupported.
+    validations:
+      required: true
