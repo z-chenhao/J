@@ -1,6 +1,6 @@
-# Contributing to J-agent
+# Contributing to J
 
-J-agent favors small, complete changes over speculative framework growth.
+J favors small, complete changes over speculative framework growth.
 
 ## Before proposing a change
 
@@ -21,13 +21,13 @@ Requirements:
 
 - Go 1.23 or newer
 
-Run:
+Run all implemented checks from the repository root:
 
 ```bash
 make check
 ```
 
-Changes to public agent behavior or `j-agent` require executable contract tests.
+Changes to public J-agent behavior or `j-agent` require executable contract tests.
 Use `gofmt`; do not commit generated binaries, provider credentials, model
 weights, fitted lenses, or experiment datasets.
 

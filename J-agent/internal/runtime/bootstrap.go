@@ -8,7 +8,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/z-chenhao/J-agent/agent"
+	"github.com/z-chenhao/J/J-agent/agent"
 )
 
 // RunCLI runs the reference CLI around an injected agent.

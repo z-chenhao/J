@@ -1,33 +1,13 @@
-APP := j-agent
-BIN_DIR := bin
-ENTRY := ./cmd/j-agent
-PROVIDER ?=
-MODEL ?=
-
-.PHONY: run build test race fmt-check vet clean check
-
-run:
-	@test -n "$(PROVIDER)" || (echo "PROVIDER is required" && exit 1)
-	@test -n "$(MODEL)" || (echo "MODEL is required" && exit 1)
-	go run $(ENTRY) --provider $(PROVIDER) --model $(MODEL)
+.PHONY: build check test clean
 
 build:
-	mkdir -p $(BIN_DIR)
-	go build -o $(BIN_DIR)/$(APP) $(ENTRY)
+	$(MAKE) -C J-agent build
+
+check:
+	$(MAKE) -C J-agent check
 
 test:
-	go test ./...
-
-race:
-	go test -race ./...
-
-fmt-check:
-	@test -z "$$(gofmt -l .)" || (gofmt -l . && exit 1)
-
-vet:
-	go vet ./...
-
-check: fmt-check vet test race build
+	$(MAKE) -C J-agent test
 
 clean:
-	rm -rf $(BIN_DIR)
+	$(MAKE) -C J-agent clean

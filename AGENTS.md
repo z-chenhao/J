@@ -2,30 +2,27 @@
 
 > Build systems that outlive their implementations.
 
-# Mission (J-agent)
+# Mission (J)
 
-J-agent is a **minimal, customizable agent runtime**.
+J is a repository of small, composable agent projects.
 
-- Keep the kernel small: command parsing, task lifecycle, queueing, and a versioned canonical event protocol.
-- Make extension easy: expose a clear adapter boundary for model, tools, transport, and richer command semantics.
-- Be protocol-agnostic by default: emit a compact canonical stream and let downstream layers translate when needed.
+- `J-agent` is the minimal Go model/tool runtime.
+- `J-tui` is a terminal consumer of J-agent.
+- `J-mem` is optional local transcript and long-term memory.
 
-Non-goals for the core runtime:
+J-agent must not depend on sibling product modules. J-tui and J-mem validate the
+same public seams available to external consumers; they are examples, not
+privileged framework layers.
 
-- Full feature parity with pi.
-- Built-in plugin/external command ecosystems.
-- UI, session trees, advanced compaction/retry policies, model fleet management.
+Repository-level architecture and accumulated decisions live in
+`docs/design.md`. Component protocol details stay with the component that owns
+them.
 
-Core invariants are always explicit. Experimental contracts are labeled as
-such and become stable only after real consumers validate them. Extra
-capabilities belong outside the core unless they directly reduce integration
-cost.
+Core invariants are explicit. Experimental contracts become stable only after
+real consumers validate them. Extra capabilities stay outside J-agent unless a
+concrete integration proves that a smaller composition is insufficient.
 
-The future `J` repository may compose J-agent with independent projects such as
-J-tui and J-mem. Those projects are first-party examples, not J-agent
-dependencies and not justification for speculative runtime interfaces.
-
-J-Space and Jacobian-lens work belongs under `research/` and is not a runtime
+J-Space and Jacobian-lens work belongs under `J-agent/research/` and is not a runtime
 dependency. It may inform model harness defaults only after reproducible
 J-lens observations and behavioral benchmarks validate the same concrete
 improvement.

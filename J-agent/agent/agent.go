@@ -37,6 +37,7 @@ type config struct {
 	systemPrompt  string
 	maxToolRounds int
 	tools         []Tool
+	history       []Message
 }
 
 // WithSystemPrompt sets an optional system message prepended to each session.
@@ -63,6 +64,17 @@ func WithMaxToolRounds(rounds int) Option {
 func WithTools(tools ...Tool) Option {
 	return optionFunc(func(cfg *config) error {
 		cfg.tools = append([]Tool(nil), tools...)
+		return nil
+	})
+}
+
+// WithHistory restores a complete conversation snapshot produced by History.
+// History is validated and copied during construction. It cannot be combined
+// with a non-empty system prompt because restored history is authoritative,
+// including any system message.
+func WithHistory(history ...Message) Option {
+	return optionFunc(func(cfg *config) error {
+		cfg.history = cloneMessages(history)
 		return nil
 	})
 }
@@ -94,6 +106,12 @@ func New(model Model, options ...Option) (*Agent, error) {
 		if err := option.apply(&cfg); err != nil {
 			return nil, err
 		}
+	}
+	if len(cfg.history) > 0 && cfg.systemPrompt != "" {
+		return nil, errors.New("system prompt cannot be combined with restored history")
+	}
+	if err := validateHistory(cfg.history); err != nil {
+		return nil, fmt.Errorf("invalid history: %w", err)
 	}
 
 	tools := make(map[string]Tool, len(cfg.tools))
@@ -128,6 +146,7 @@ func New(model Model, options ...Option) (*Agent, error) {
 		maxToolRounds: cfg.maxToolRounds,
 		tools:         tools,
 		toolSpecs:     specs,
+		history:       cloneMessages(cfg.history),
 	}, nil
 }
 
@@ -380,6 +399,148 @@ func validateToolCalls(calls []ToolCall) error {
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(call.Arguments, &object); err != nil || object == nil {
 			return fmt.Errorf("tool call %q arguments must be a JSON object", call.ID)
+		}
+	}
+	return nil
+}
+
+func validateHistory(messages []Message) error {
+	pendingCalls := make(map[string]string)
+	seenCallIDs := make(map[string]struct{})
+	var previousRole Role
+
+	for index, message := range messages {
+		if err := validateHistoryMessage(index, message); err != nil {
+			return err
+		}
+
+		switch message.Role {
+		case RoleSystem:
+			if index != 0 {
+				return fmt.Errorf("message %d: system message must be first", index)
+			}
+		case RoleUser:
+			if len(pendingCalls) > 0 {
+				return fmt.Errorf("message %d: user message precedes tool results", index)
+			}
+		case RoleAssistant:
+			if previousRole == "" || previousRole == RoleSystem {
+				return fmt.Errorf("message %d: assistant message has no preceding user message or tool result", index)
+			}
+			if previousRole == RoleAssistant {
+				return fmt.Errorf("message %d: consecutive assistant messages are not a valid runtime transcript", index)
+			}
+			if len(pendingCalls) > 0 {
+				return fmt.Errorf("message %d: assistant message precedes tool results", index)
+			}
+			calls := message.ToolCalls()
+			if err := validateToolCalls(calls); err != nil {
+				return fmt.Errorf("message %d: %w", index, err)
+			}
+			for _, call := range calls {
+				if _, exists := seenCallIDs[call.ID]; exists {
+					return fmt.Errorf("message %d: duplicate tool call id %q in history", index, call.ID)
+				}
+				seenCallIDs[call.ID] = struct{}{}
+				pendingCalls[call.ID] = call.Name
+			}
+		case RoleTool:
+			name, exists := pendingCalls[message.ToolCallID]
+			if !exists {
+				return fmt.Errorf("message %d: tool result %q has no pending tool call", index, message.ToolCallID)
+			}
+			if message.ToolName != name {
+				return fmt.Errorf(
+					"message %d: tool result %q names %q, want %q",
+					index,
+					message.ToolCallID,
+					message.ToolName,
+					name,
+				)
+			}
+			delete(pendingCalls, message.ToolCallID)
+		}
+		previousRole = message.Role
+	}
+
+	if len(pendingCalls) > 0 {
+		return errors.New("history ends before all tool calls have results")
+	}
+	return nil
+}
+
+func validateHistoryMessage(index int, message Message) error {
+	if len(message.Content) == 0 {
+		return fmt.Errorf("message %d: content is required", index)
+	}
+
+	switch message.Role {
+	case RoleSystem, RoleUser:
+		if message.ToolCallID != "" || message.ToolName != "" || message.IsError {
+			return fmt.Errorf("message %d: role %q has tool-result metadata", index, message.Role)
+		}
+	case RoleAssistant:
+		if message.ToolCallID != "" || message.ToolName != "" || message.IsError {
+			return fmt.Errorf("message %d: assistant message has tool-result metadata", index)
+		}
+	case RoleTool:
+		if strings.TrimSpace(message.ToolCallID) == "" {
+			return fmt.Errorf("message %d: tool result call id is required", index)
+		}
+		if strings.TrimSpace(message.ToolName) == "" {
+			return fmt.Errorf("message %d: tool result name is required", index)
+		}
+	default:
+		return fmt.Errorf("message %d: unsupported role %q", index, message.Role)
+	}
+
+	for contentIndex, content := range message.Content {
+		switch content.Type {
+		case ContentText:
+			if content.ToolCall != nil {
+				return fmt.Errorf("message %d content %d: text has an unexpected tool call", index, contentIndex)
+			}
+		case ContentReasoning:
+			if message.Role != RoleAssistant {
+				return fmt.Errorf("message %d content %d: reasoning requires assistant role", index, contentIndex)
+			}
+			if content.ToolCall != nil {
+				return fmt.Errorf("message %d content %d: reasoning has an unexpected tool call", index, contentIndex)
+			}
+		case ContentToolCall:
+			if message.Role != RoleAssistant {
+				return fmt.Errorf("message %d content %d: tool call requires assistant role", index, contentIndex)
+			}
+			if content.ToolCall == nil {
+				return fmt.Errorf("message %d content %d: tool call is missing", index, contentIndex)
+			}
+			if content.Text != "" {
+				return fmt.Errorf("message %d content %d: tool call has unexpected text", index, contentIndex)
+			}
+		default:
+			return fmt.Errorf(
+				"message %d content %d: unsupported type %q",
+				index,
+				contentIndex,
+				content.Type,
+			)
+		}
+	}
+
+	switch message.Role {
+	case RoleSystem, RoleUser:
+		if strings.TrimSpace(message.Text()) == "" {
+			return fmt.Errorf("message %d: role %q requires text", index, message.Role)
+		}
+	case RoleAssistant:
+		if strings.TrimSpace(message.Text()) == "" && len(message.ToolCalls()) == 0 {
+			return fmt.Errorf("message %d: assistant message requires text or tool calls", index)
+		}
+	case RoleTool:
+		for contentIndex, content := range message.Content {
+			if content.Type != ContentText {
+				return fmt.Errorf("message %d content %d: tool result must contain only text", index, contentIndex)
+			}
 		}
 	}
 	return nil

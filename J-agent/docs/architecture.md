@@ -43,6 +43,7 @@ The runtime must:
 - bounded model/tool execution
 - cancellation through `context.Context`
 - defensive conversation snapshots
+- validated construction-time conversation restoration
 - FIFO task admission and one terminal task state
 
 One `Agent` owns one serialized conversation. A run commits its user message
@@ -60,7 +61,7 @@ read `History`, but must not reenter `Run` or `Reset` on the same `Agent`.
 - system prompts
 - provider selection and credentials
 - concrete tools and their authorization
-- retry, compaction, persistence, and memory
+- retry, compaction, persistence backends, and memory policy
 - model routing and harness recipes
 - transport and downstream protocol translation
 
@@ -75,6 +76,13 @@ Package `agent` is intended for external Go embedders. Its responsibility is
 one conversation-scoped model/tool loop. Provider wire details live in public
 adapter packages; the agent package does not own provider selection, process
 transport, or durable task state.
+
+`WithHistory` is an experimental construction-time seam for restoring the
+complete transcript returned by `History`. The runtime validates message
+shapes, tool-call/result correlation, and completion of tool batches before
+accepting restored state. It deliberately does not define a storage interface,
+session identifier, persistence format, retention policy, or runtime message
+mutation API.
 
 Evolution strategy:
 
@@ -115,11 +123,11 @@ implementations reveal a stable mechanism.
 
 ## Relationship to J
 
-J-agent is an independently usable runtime kernel. A future `J` repository may
-compose J-agent with first-party projects such as J-tui and J-mem. Those
-projects demonstrate a default customization; they do not become mandatory
-runtime layers, and their planned existence does not justify interfaces before
-real integration work exposes an independent variation axis.
+J-agent is an independently usable runtime kernel inside the J repository.
+Its sibling projects J-tui and J-mem demonstrate a default customization; they
+do not become mandatory runtime layers, and their planned existence does not
+justify interfaces before real integration work exposes an independent
+variation axis.
 
 J-tui and J-mem should initially consume the same experimental public seams as
 third-party embedders. A seam may be revised while experimental, and should

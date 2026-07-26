@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/z-chenhao/J-agent/agent"
+	"github.com/z-chenhao/J/J-agent/agent"
 )
 
 type fixedModel struct {

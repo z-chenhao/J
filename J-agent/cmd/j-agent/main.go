@@ -10,10 +10,10 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/z-chenhao/J-agent/adapter/deepseek"
-	"github.com/z-chenhao/J-agent/adapter/ollama"
-	"github.com/z-chenhao/J-agent/agent"
-	"github.com/z-chenhao/J-agent/internal/runtime"
+	"github.com/z-chenhao/J/J-agent/adapter/deepseek"
+	"github.com/z-chenhao/J/J-agent/adapter/ollama"
+	"github.com/z-chenhao/J/J-agent/agent"
+	"github.com/z-chenhao/J/J-agent/internal/runtime"
 )
 
 type config struct {

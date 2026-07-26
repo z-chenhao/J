@@ -17,13 +17,17 @@ jobs:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
+          go-version-file: J-agent/go.mod
           cache: false
       - name: Formatting
+        working-directory: J-agent
         run: test -z "$(gofmt -l .)"
       - name: Vet
+        working-directory: J-agent
         run: go vet ./...
       - name: Test
+        working-directory: J-agent
         run: go test ./...
       - name: Race detector
+        working-directory: J-agent
         run: go test -race ./...

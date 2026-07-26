@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/z-chenhao/J-agent/agent"
+	"github.com/z-chenhao/J/J-agent/agent"
 )
 
 func TestCompleteStreamsToolCallAndUsage(t *testing.T) {

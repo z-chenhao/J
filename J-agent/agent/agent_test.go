@@ -228,6 +228,164 @@ func TestHistoryIsDeepCopy(t *testing.T) {
 	}
 }
 
+func TestWithHistoryRestoresAndContinuesConversation(t *testing.T) {
+	history := []Message{
+		TextMessage(RoleSystem, "system"),
+		TextMessage(RoleUser, "first"),
+		TextMessage(RoleAssistant, "first answer"),
+	}
+	model := &scriptedModel{outputs: []ModelResponse{
+		response(TextMessage(RoleAssistant, "second answer"), StopReasonStop),
+	}}
+	runner, err := New(model, WithHistory(history...))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	history[2].Content[0].Text = "mutated"
+	result, err := runner.Run(context.Background(), "second", nil)
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if result.Message.Text() != "second answer" {
+		t.Fatalf("result=%q, want second answer", result.Message.Text())
+	}
+	if len(model.requests) != 1 || len(model.requests[0].Messages) != 4 {
+		t.Fatalf("request messages=%#v", model.requests)
+	}
+	if got := model.requests[0].Messages[2].Text(); got != "first answer" {
+		t.Fatalf("restored history aliases caller memory: %q", got)
+	}
+	if got := model.requests[0].Messages[3].Text(); got != "second" {
+		t.Fatalf("new prompt=%q, want second", got)
+	}
+}
+
+func TestWithHistoryRestoresCompletedToolRound(t *testing.T) {
+	history := []Message{
+		TextMessage(RoleUser, "collect"),
+		toolMessage("call-1", "collect", `{"text":"saved"}`),
+		func() Message {
+			message := TextMessage(RoleTool, "saved")
+			message.ToolCallID = "call-1"
+			message.ToolName = "collect"
+			return message
+		}(),
+		TextMessage(RoleAssistant, "done"),
+	}
+	runner, err := New(&scriptedModel{}, WithHistory(history...))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	if got := runner.History(); len(got) != len(history) || got[2].ToolCallID != "call-1" {
+		t.Fatalf("restored history=%#v", got)
+	}
+}
+
+func TestWithHistoryRejectsAmbiguousSystemPrompt(t *testing.T) {
+	_, err := New(
+		&scriptedModel{},
+		WithSystemPrompt("new system"),
+		WithHistory(TextMessage(RoleUser, "saved")),
+	)
+	if err == nil {
+		t.Fatal("expected system prompt and history conflict")
+	}
+}
+
+func TestWithHistoryRejectsInvalidTranscript(t *testing.T) {
+	toolResult := func(id, name string) Message {
+		message := TextMessage(RoleTool, "result")
+		message.ToolCallID = id
+		message.ToolName = name
+		return message
+	}
+	tests := []struct {
+		name    string
+		history []Message
+	}{
+		{
+			name: "system message after user",
+			history: []Message{
+				TextMessage(RoleUser, "hello"),
+				TextMessage(RoleSystem, "late"),
+			},
+		},
+		{
+			name: "assistant without input",
+			history: []Message{
+				TextMessage(RoleAssistant, "hello"),
+			},
+		},
+		{
+			name: "orphan tool result",
+			history: []Message{
+				TextMessage(RoleUser, "hello"),
+				toolResult("call-1", "collect"),
+			},
+		},
+		{
+			name: "unresolved tool call",
+			history: []Message{
+				TextMessage(RoleUser, "hello"),
+				toolMessage("call-1", "collect", `{}`),
+			},
+		},
+		{
+			name: "mismatched tool result name",
+			history: []Message{
+				TextMessage(RoleUser, "hello"),
+				toolMessage("call-1", "collect", `{}`),
+				toolResult("call-1", "other"),
+			},
+		},
+		{
+			name: "duplicate tool call identity",
+			history: []Message{
+				TextMessage(RoleUser, "first"),
+				toolMessage("call-1", "collect", `{}`),
+				toolResult("call-1", "collect"),
+				TextMessage(RoleAssistant, "done"),
+				TextMessage(RoleUser, "second"),
+				toolMessage("call-1", "collect", `{}`),
+				toolResult("call-1", "collect"),
+			},
+		},
+		{
+			name: "tool call in user message",
+			history: []Message{
+				{
+					Role: RoleUser,
+					Content: []Content{{
+						Type: ContentToolCall,
+						ToolCall: &ToolCall{
+							ID:        "call-1",
+							Name:      "collect",
+							Arguments: json.RawMessage(`{}`),
+						},
+					}},
+				},
+			},
+		},
+		{
+			name: "invalid tool arguments",
+			history: []Message{
+				TextMessage(RoleUser, "hello"),
+				toolMessage("call-1", "collect", `[]`),
+				toolResult("call-1", "collect"),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := New(&scriptedModel{}, WithHistory(test.history...)); err == nil {
+				t.Fatal("expected invalid history error")
+			}
+		})
+	}
+}
+
 func TestNewRejectsAmbiguousTools(t *testing.T) {
 	tool := &collectTool{}
 	if _, err := New(&scriptedModel{}, WithTools(tool, tool)); err == nil {

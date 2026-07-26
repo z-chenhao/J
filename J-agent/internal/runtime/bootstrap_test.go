@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/z-chenhao/J-agent/agent"
+	"github.com/z-chenhao/J/J-agent/agent"
 )
 
 func testAgent(t *testing.T) *agent.Agent {
