@@ -20,7 +20,7 @@ var (
 	ErrEmptyModelOutput = errors.New("model returned an empty assistant message")
 )
 
-const defaultMaxToolRounds = 4
+const defaultMaxToolRounds = 32
 
 // Option configures an Agent through one of this package's With functions.
 type Option interface {
@@ -248,18 +248,23 @@ func (a *Agent) Run(ctx context.Context, input string, handler EventHandler) (Ru
 			return result, ErrEmptyModelOutput
 		}
 		if len(calls) > 0 && toolRounds >= a.maxToolRounds {
+			limitErr := fmt.Errorf(
+				"%w: %d completed rounds",
+				ErrToolRoundLimit,
+				a.maxToolRounds,
+			)
 			emit(handler, Event{
 				Type:     EventMessageFailed,
 				Duration: modelDuration,
-				Error:    ErrToolRoundLimit.Error(),
+				Error:    limitErr.Error(),
 			})
 			emit(handler, Event{
 				Type:     EventTurnFailed,
 				Duration: modelDuration,
-				Error:    ErrToolRoundLimit.Error(),
+				Error:    limitErr.Error(),
 			})
-			emit(handler, Event{Type: EventAgentFailed, Error: ErrToolRoundLimit.Error()})
-			return result, ErrToolRoundLimit
+			emit(handler, Event{Type: EventAgentFailed, Error: limitErr.Error()})
+			return result, limitErr
 		}
 
 		messages = append(messages, output)

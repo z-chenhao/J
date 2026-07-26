@@ -52,7 +52,10 @@ before model execution and then commits only completed, accepted model/tool
 messages. An invalid or over-limit model response is not committed. A tool
 round means one accepted model response containing one or more tool calls,
 followed by execution of those calls; the final answer receives its own model
-turn after the last permitted tool round.
+turn after the last permitted tool round. The default allowance is 32 completed
+tool rounds: high enough for an extended coding workflow while retaining a
+finite runaway-loop fuse. Embedders can narrow or widen that budget through
+`WithMaxToolRounds`.
 
 Per-run event handlers execute synchronously to preserve ordering. They may
 read `History`, but must not reenter `Run` or `Reset` on the same `Agent`.

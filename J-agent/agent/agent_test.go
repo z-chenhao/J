@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -425,6 +427,39 @@ func TestToolRoundLimitAllowsFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestDefaultToolRoundLimitAllowsExtendedRun(t *testing.T) {
+	const toolRounds = 16
+	outputs := make([]ModelResponse, 0, toolRounds+1)
+	for round := range toolRounds {
+		outputs = append(outputs, response(
+			toolMessage(
+				fmt.Sprintf("call-%d", round),
+				"collect",
+				fmt.Sprintf(`{"text":"round-%d"}`, round),
+			),
+			StopReasonToolCalls,
+		))
+	}
+	outputs = append(outputs, response(TextMessage(RoleAssistant, "done"), StopReasonStop))
+
+	model := &scriptedModel{outputs: outputs}
+	tool := &collectTool{}
+	runner, err := New(model, WithTools(tool))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	result, err := runner.Run(context.Background(), "hello", nil)
+	if err != nil {
+		t.Fatalf("Run() error=%v", err)
+	}
+	if result.Message.Text() != "done" || result.Turns != toolRounds+1 {
+		t.Fatalf("result=%#v", result)
+	}
+	if tool.calls != toolRounds {
+		t.Fatalf("tool calls=%d, want %d", tool.calls, toolRounds)
+	}
+}
+
 func TestToolRoundLimitRejectsNextToolWithoutPersistingOrExecutingIt(t *testing.T) {
 	model := &scriptedModel{outputs: []ModelResponse{
 		response(toolMessage("call-1", "collect", `{"text":"first"}`), StopReasonToolCalls),
@@ -441,6 +476,9 @@ func TestToolRoundLimitRejectsNextToolWithoutPersistingOrExecutingIt(t *testing.
 	})
 	if !errors.Is(err, ErrToolRoundLimit) {
 		t.Fatalf("Run() error=%v, want ErrToolRoundLimit", err)
+	}
+	if !strings.Contains(err.Error(), "1 completed rounds") {
+		t.Fatalf("Run() error=%q, want configured round count", err)
 	}
 	if tool.calls != 1 {
 		t.Fatalf("tool calls=%d, want 1", tool.calls)

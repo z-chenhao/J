@@ -106,6 +106,12 @@ An embedding application still chooses its complete tool set through
 Bash package does not define a generic terminal, executor, approval, or sandbox
 interface.
 
+The runtime permits 32 completed tool rounds by default before treating another
+tool request as a runaway loop. A final answer still receives its own model
+turn. Embedders with a different execution budget can set the existing
+`agent.WithMaxToolRounds` option; the limit remains a safety fuse rather than a
+normal workflow target.
+
 ## Embed J-agent
 
 Use a checked-in adapter or implement the small `agent.Model` contract:
