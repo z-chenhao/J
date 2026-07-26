@@ -30,7 +30,7 @@ func TestCompleteStreamsToolCallAndUsage(t *testing.T) {
 		}
 		body := "data: " + `{"id":"resp-1","model":"deepseek-v4-pro","choices":[{"delta":{"reasoning_content":"think "},"finish_reason":""}]}` + "\n\n" +
 			"data: " + `{"id":"resp-1","model":"deepseek-v4-pro","choices":[{"delta":{"content":"checking"},"finish_reason":""}]}` + "\n\n" +
-			"data: " + `{"id":"resp-1","model":"deepseek-v4-pro","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"weather","arguments":"{\"city\":\"HZ\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14,"prompt_cache_hit_tokens":3,"completion_tokens_details":{"reasoning_tokens":2}}}` + "\n\n" +
+			"data: " + `{"id":"resp-1","model":"deepseek-v4-pro","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"weather","arguments":"{\"city\":\"HZ\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14,"prompt_cache_hit_tokens":3,"prompt_cache_miss_tokens":7,"completion_tokens_details":{"reasoning_tokens":2}}}` + "\n\n" +
 			"data: [DONE]\n\n"
 		return response(http.StatusOK, body), nil
 	})}
@@ -80,6 +80,22 @@ func TestCompleteStreamsToolCallAndUsage(t *testing.T) {
 	if len(deltas) != 3 || deltas[0].Type != agent.DeltaReasoning ||
 		deltas[2].Type != agent.DeltaToolCall {
 		t.Fatalf("deltas=%#v", deltas)
+	}
+}
+
+func TestMapUsageDistinguishesUnreportedCacheFromZeroHit(t *testing.T) {
+	withoutCache := mapUsage(&usage{PromptTokens: 10})
+	if withoutCache.CachedInputTokens != nil {
+		t.Fatalf("unreported cache = %#v", withoutCache.CachedInputTokens)
+	}
+
+	miss := int64(10)
+	withZeroHit := mapUsage(&usage{
+		PromptTokens:          10,
+		PromptCacheMissTokens: &miss,
+	})
+	if withZeroHit.CachedInputTokens == nil || *withZeroHit.CachedInputTokens != 0 {
+		t.Fatalf("reported zero hit = %#v", withZeroHit.CachedInputTokens)
 	}
 }
 

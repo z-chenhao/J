@@ -188,10 +188,11 @@ type delta struct {
 }
 
 type usage struct {
-	PromptTokens           int64 `json:"prompt_tokens"`
-	CompletionTokens       int64 `json:"completion_tokens"`
-	TotalTokens            int64 `json:"total_tokens"`
-	PromptCacheHitTokens   int64 `json:"prompt_cache_hit_tokens"`
+	PromptTokens           int64  `json:"prompt_tokens"`
+	CompletionTokens       int64  `json:"completion_tokens"`
+	TotalTokens            int64  `json:"total_tokens"`
+	PromptCacheHitTokens   *int64 `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens  *int64 `json:"prompt_cache_miss_tokens"`
 	CompletionTokenDetails *struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
 	} `json:"completion_tokens_details"`
@@ -449,12 +450,18 @@ func (m *Model) readStream(reader io.Reader, emit func(agent.ModelDelta)) (agent
 }
 
 func mapUsage(value *usage) *agent.Usage {
-	cached := value.PromptCacheHitTokens
 	result := &agent.Usage{
-		InputTokens:       value.PromptTokens,
-		OutputTokens:      value.CompletionTokens,
-		TotalTokens:       value.TotalTokens,
-		CachedInputTokens: &cached,
+		InputTokens:  value.PromptTokens,
+		OutputTokens: value.CompletionTokens,
+		TotalTokens:  value.TotalTokens,
+	}
+	switch {
+	case value.PromptCacheHitTokens != nil:
+		cached := *value.PromptCacheHitTokens
+		result.CachedInputTokens = &cached
+	case value.PromptCacheMissTokens != nil:
+		cached := max(value.PromptTokens-*value.PromptCacheMissTokens, 0)
+		result.CachedInputTokens = &cached
 	}
 	if value.CompletionTokenDetails != nil {
 		reasoning := value.CompletionTokenDetails.ReasoningTokens

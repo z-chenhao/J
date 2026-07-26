@@ -97,6 +97,7 @@ Provider sources:
 
 - [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion)
 - [DeepSeek thinking and tool continuation](https://api-docs.deepseek.com/guides/thinking_mode)
+- [DeepSeek context cache](https://api-docs.deepseek.com/zh-cn/guides/kv_cache/)
 - [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling)
 - [Ollama usage metrics](https://docs.ollama.com/api/usage)
 
@@ -113,6 +114,18 @@ Provider sources:
 
 The adapter boundary absorbs these differences. None of them appear as
 provider-specific conditionals in the agent loop.
+
+DeepSeek enables its context cache automatically. J-agent does not send a
+provider-specific cache switch: its ordered, append-only transcript preserves
+the exact request prefix needed for reuse across conversation turns. The
+adapter maps `prompt_cache_hit_tokens` to `Usage.CachedInputTokens`.
+`prompt_cache_miss_tokens` remains derivable as
+`Usage.InputTokens - Usage.CachedInputTokens`, because DeepSeek defines prompt
+tokens as the sum of cache hits and misses. The adapter keeps
+`CachedInputTokens` nil when the provider reports neither cache field, so an
+unreported metric is not confused with an observed zero hit. Cache population
+is best effort and therefore remains an observed usage result, not a runtime
+guarantee.
 
 ## Deliberately not generalized
 
