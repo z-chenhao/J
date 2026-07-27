@@ -600,24 +600,28 @@ func addUsage(total **Usage, usage *Usage) {
 		return
 	}
 	if *total == nil {
-		*total = &Usage{}
+		*total = cloneUsage(usage)
+		return
 	}
 	(*total).InputTokens += usage.InputTokens
 	(*total).OutputTokens += usage.OutputTokens
 	(*total).TotalTokens += usage.TotalTokens
-	addOptionalTokenCount(&(*total).CachedInputTokens, usage.CachedInputTokens)
-	addOptionalTokenCount(&(*total).ReasoningTokens, usage.ReasoningTokens)
+	(*total).CachedInputTokens = addOptionalTokenCount(
+		(*total).CachedInputTokens,
+		usage.CachedInputTokens,
+	)
+	(*total).ReasoningTokens = addOptionalTokenCount(
+		(*total).ReasoningTokens,
+		usage.ReasoningTokens,
+	)
 }
 
-func addOptionalTokenCount(total **int64, value *int64) {
-	if value == nil {
-		return
+func addOptionalTokenCount(total, value *int64) *int64 {
+	if total == nil || value == nil {
+		return nil
 	}
-	if *total == nil {
-		zero := int64(0)
-		*total = &zero
-	}
-	**total += *value
+	sum := *total + *value
+	return &sum
 }
 
 func cloneDuration(duration *time.Duration) *time.Duration {

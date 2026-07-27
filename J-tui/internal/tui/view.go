@@ -256,15 +256,15 @@ func (m Model) inputBorderStyle() lipgloss.Style {
 
 func (m Model) footer() string {
 	parts := []string{m.status}
-	if observation := m.lastModel; observation != nil {
-		parts = append(parts, formatDuration(observation.Duration))
-		if observation.FirstDelta != nil {
-			parts = append(parts, "ttft "+formatDuration(*observation.FirstDelta))
+	if metrics := m.runMetrics; metrics.turns > 0 {
+		parts = append(parts, formatDuration(metrics.modelDuration))
+		if metrics.firstDelta != nil {
+			parts = append(parts, "ttft "+formatDuration(*metrics.firstDelta))
 		}
-		if observation.Usage != nil {
-			parts = append(parts, fmt.Sprintf("%d tokens", observation.Usage.TotalTokens))
-			if cached := observation.Usage.CachedInputTokens; cached != nil {
-				missed := max(observation.Usage.InputTokens-*cached, 0)
+		if metrics.usageComplete && metrics.usage != nil {
+			parts = append(parts, fmt.Sprintf("%d tokens", metrics.usage.TotalTokens))
+			if cached := metrics.usage.CachedInputTokens; cached != nil {
+				missed := max(metrics.usage.InputTokens-*cached, 0)
 				parts = append(
 					parts,
 					fmt.Sprintf("cache %d hit / %d miss", *cached, missed),

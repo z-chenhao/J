@@ -50,7 +50,8 @@ terminal event. Canceling a task that is already terminal fails with
 
 A settled task reports observed timestamps, queue and run duration, model/tool
 duration, first-delta latency, turn count, and aggregate token usage when the
-provider reported it.
+provider reported it. Optional usage breakdowns remain absent if any reported
+turn omits that breakdown.
 
 ### State and messages
 

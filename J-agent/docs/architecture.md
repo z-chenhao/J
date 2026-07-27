@@ -38,6 +38,10 @@ The runtime must:
 - emit an ordered, writable event stream
 - report comparable stop, usage, and latency facts
 
+Run-level mandatory token counts sum the provider-reported turns. An optional
+usage breakdown remains absent when any reported turn omits that breakdown, so
+unknown cached or reasoning tokens are not silently counted as misses or zero.
+
 ## Mechanism and policy
 
 ### Runtime mechanism

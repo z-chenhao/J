@@ -188,9 +188,12 @@ storage: it preserves one J-agent transcript and appends each turn, so the next
 request retains the exact prior message prefix required for reuse. JSON mode
 does the same when several prompts are passed to one invocation.
 
-The footer reports provider-observed cache hit and miss tokens. JSON event mode
-keeps `usage.inputTokens` and `usage.cachedInputTokens`; cache misses are
-`inputTokens - cachedInputTokens`. The `openai-completions` API maps
+The footer reports cache hit and miss tokens aggregated across the current run
+when every model turn reports the required usage fields. It leaves an
+unreported or partial cache breakdown unknown instead of counting it as a
+miss. JSON event mode keeps each turn's `usage.inputTokens` and
+`usage.cachedInputTokens`; per-turn cache misses are `inputTokens -
+cachedInputTokens`. The `openai-completions` API maps
 `prompt_tokens_details.cached_tokens` into that same provider-neutral usage
 field and also understands DeepSeek's cache hit fields. Cache population and
 hits remain best-effort service behavior and cannot be guaranteed by the

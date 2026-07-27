@@ -129,6 +129,37 @@ func TestRunProvidesToolSpecsAndExecutesTool(t *testing.T) {
 	}
 }
 
+func TestAddUsagePreservesUnknownOptionalBreakdowns(t *testing.T) {
+	cachedOne := int64(2)
+	cachedTwo := int64(3)
+	var total *Usage
+	addUsage(&total, &Usage{
+		InputTokens:       4,
+		OutputTokens:      1,
+		TotalTokens:       5,
+		CachedInputTokens: &cachedOne,
+	})
+	addUsage(&total, &Usage{
+		InputTokens:       6,
+		OutputTokens:      2,
+		TotalTokens:       8,
+		CachedInputTokens: &cachedTwo,
+	})
+	if total == nil || total.InputTokens != 10 || total.TotalTokens != 13 ||
+		total.CachedInputTokens == nil || *total.CachedInputTokens != 5 {
+		t.Fatalf("complete usage=%#v", total)
+	}
+
+	addUsage(&total, &Usage{
+		InputTokens:  8,
+		OutputTokens: 3,
+		TotalTokens:  11,
+	})
+	if total.InputTokens != 18 || total.TotalTokens != 24 || total.CachedInputTokens != nil {
+		t.Fatalf("usage with missing cache breakdown=%#v", total)
+	}
+}
+
 func TestRunEmitsStreamingLifecycleAndObservation(t *testing.T) {
 	model := &scriptedModel{
 		outputs: []ModelResponse{response(TextMessage(RoleAssistant, "done"), StopReasonStop)},

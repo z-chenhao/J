@@ -54,6 +54,14 @@ type runDoneMsg struct {
 	err error
 }
 
+type runMetrics struct {
+	turns         int
+	modelDuration time.Duration
+	firstDelta    *time.Duration
+	usage         *agent.Usage
+	usageComplete bool
+}
+
 // Model is one full-screen J-agent conversation.
 type Model struct {
 	ctx      context.Context
@@ -72,7 +80,7 @@ type Model struct {
 	activeTools    map[string]int
 	reasoningBytes int
 	status         string
-	lastModel      *agent.ModelObservation
+	runMetrics     runMetrics
 	running        bool
 	cancel         context.CancelFunc
 	events         chan tea.Msg
@@ -268,7 +276,7 @@ func (m Model) submit(prompt string) (tea.Model, tea.Cmd) {
 	m.cancel = cancel
 	m.running = true
 	m.status = "starting"
-	m.lastModel = nil
+	m.runMetrics = runMetrics{}
 	m.reasoningBytes = 0
 	m.activeMessage = -1
 	m.activeTools = make(map[string]int)
@@ -381,8 +389,7 @@ func (m *Model) applyEvent(event agent.Event) {
 		m.finishTool(event)
 	case agent.EventTurnCompleted:
 		if event.Model != nil {
-			observation := *event.Model
-			m.lastModel = &observation
+			m.runMetrics.add(*event.Model)
 		}
 		m.status = "running"
 	case agent.EventTurnFailed:
@@ -402,6 +409,69 @@ func (m *Model) applyEvent(event agent.Event) {
 			})
 		}
 	}
+}
+
+func (metrics *runMetrics) add(observation agent.ModelObservation) {
+	firstTurn := metrics.turns == 0
+	metrics.turns++
+	metrics.modelDuration += observation.Duration
+	if metrics.firstDelta == nil && observation.FirstDelta != nil {
+		value := *observation.FirstDelta
+		metrics.firstDelta = &value
+	}
+
+	if firstTurn {
+		metrics.usageComplete = observation.Usage != nil
+		metrics.usage = cloneObservedUsage(observation.Usage)
+		return
+	}
+	if !metrics.usageComplete {
+		return
+	}
+	if observation.Usage == nil {
+		metrics.usage = nil
+		metrics.usageComplete = false
+		return
+	}
+	addObservedUsage(metrics.usage, observation.Usage)
+}
+
+func cloneObservedUsage(usage *agent.Usage) *agent.Usage {
+	if usage == nil {
+		return nil
+	}
+	cloned := *usage
+	if usage.CachedInputTokens != nil {
+		value := *usage.CachedInputTokens
+		cloned.CachedInputTokens = &value
+	}
+	if usage.ReasoningTokens != nil {
+		value := *usage.ReasoningTokens
+		cloned.ReasoningTokens = &value
+	}
+	return &cloned
+}
+
+func addObservedUsage(total, value *agent.Usage) {
+	total.InputTokens += value.InputTokens
+	total.OutputTokens += value.OutputTokens
+	total.TotalTokens += value.TotalTokens
+	total.CachedInputTokens = addObservedTokenCount(
+		total.CachedInputTokens,
+		value.CachedInputTokens,
+	)
+	total.ReasoningTokens = addObservedTokenCount(
+		total.ReasoningTokens,
+		value.ReasoningTokens,
+	)
+}
+
+func addObservedTokenCount(total, value *int64) *int64 {
+	if total == nil || value == nil {
+		return nil
+	}
+	sum := *total + *value
+	return &sum
 }
 
 func (m *Model) finishMessageWithError(message string) {

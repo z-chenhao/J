@@ -80,6 +80,99 @@ func TestApplyEventTracksStreamingReasoningAndTools(t *testing.T) {
 	}
 }
 
+func TestFooterAggregatesCompleteRunUsage(t *testing.T) {
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	firstCached := int64(7)
+	secondCached := int64(12)
+	firstDelta := 5 * time.Millisecond
+	secondDelta := 3 * time.Millisecond
+	model.applyEvent(agent.Event{
+		Type: agent.EventTurnCompleted,
+		Model: &agent.ModelObservation{
+			Duration:   20 * time.Millisecond,
+			FirstDelta: &firstDelta,
+			Usage: &agent.Usage{
+				InputTokens:       10,
+				OutputTokens:      2,
+				TotalTokens:       12,
+				CachedInputTokens: &firstCached,
+			},
+		},
+	})
+	model.applyEvent(agent.Event{
+		Type: agent.EventTurnCompleted,
+		Model: &agent.ModelObservation{
+			Duration:   30 * time.Millisecond,
+			FirstDelta: &secondDelta,
+			Usage: &agent.Usage{
+				InputTokens:       20,
+				OutputTokens:      3,
+				TotalTokens:       23,
+				CachedInputTokens: &secondCached,
+			},
+		},
+	})
+
+	footer := model.footer()
+	for _, expected := range []string{
+		"50ms",
+		"ttft 5ms",
+		"35 tokens",
+		"cache 19 hit / 11 miss",
+	} {
+		if !strings.Contains(footer, expected) {
+			t.Fatalf("footer does not contain %q: %q", expected, footer)
+		}
+	}
+}
+
+func TestFooterDoesNotPresentPartialCacheBreakdown(t *testing.T) {
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	cached := int64(7)
+	model.applyEvent(agent.Event{
+		Type: agent.EventTurnCompleted,
+		Model: &agent.ModelObservation{Usage: &agent.Usage{
+			InputTokens:       10,
+			OutputTokens:      2,
+			TotalTokens:       12,
+			CachedInputTokens: &cached,
+		}},
+	})
+	model.applyEvent(agent.Event{
+		Type: agent.EventTurnCompleted,
+		Model: &agent.ModelObservation{Usage: &agent.Usage{
+			InputTokens:  20,
+			OutputTokens: 3,
+			TotalTokens:  23,
+		}},
+	})
+
+	footer := model.footer()
+	if !strings.Contains(footer, "35 tokens") || strings.Contains(footer, "cache ") {
+		t.Fatalf("footer presents partial cache usage: %q", footer)
+	}
+}
+
+func TestFooterDoesNotPresentPartialRunUsage(t *testing.T) {
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	model.applyEvent(agent.Event{
+		Type: agent.EventTurnCompleted,
+		Model: &agent.ModelObservation{Usage: &agent.Usage{
+			InputTokens:  10,
+			OutputTokens: 2,
+			TotalTokens:  12,
+		}},
+	})
+	model.applyEvent(agent.Event{
+		Type:  agent.EventTurnCompleted,
+		Model: &agent.ModelObservation{},
+	})
+
+	if footer := model.footer(); strings.Contains(footer, "tokens") {
+		t.Fatalf("footer presents partial run usage: %q", footer)
+	}
+}
+
 func durationPointer(value time.Duration) *time.Duration {
 	return &value
 }
