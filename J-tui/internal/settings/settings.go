@@ -51,6 +51,7 @@ type MCPServer struct {
 	Args    []string `json:"args,omitempty"`
 	Env     []string `json:"env,omitempty"`
 	CWD     string   `json:"cwd,omitempty"`
+	Tools   []string `json:"tools,omitempty"`
 }
 
 // Memory contains J-tui's two independently optional J-mem capabilities.
@@ -274,6 +275,26 @@ func (extensions *Extensions) validate() error {
 				)
 			}
 			seenEnvironment[variable] = struct{}{}
+		}
+		if server.Tools != nil && len(server.Tools) == 0 {
+			return fmt.Errorf(
+				"MCP server %q tools must be omitted or contain at least one tool name",
+				name,
+			)
+		}
+		seenTools := make(map[string]struct{}, len(server.Tools))
+		for _, tool := range server.Tools {
+			if tool == "" || tool != strings.TrimSpace(tool) {
+				return fmt.Errorf(
+					"MCP server %q tool name %q must be non-empty and trimmed",
+					name,
+					tool,
+				)
+			}
+			if _, exists := seenTools[tool]; exists {
+				return fmt.Errorf("MCP server %q repeats tool name %q", name, tool)
+			}
+			seenTools[tool] = struct{}{}
 		}
 	}
 	return nil

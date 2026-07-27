@@ -297,6 +297,93 @@ func TestRunInitializesConfig(t *testing.T) {
 	}
 }
 
+func TestRunListsAdvertisedAndSelectedMCPToolsWithoutModel(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv("J_TUI_MCP_TEST_SERVER", "1")
+	t.Setenv("J_TUI_MCP_TOOL_NAME", "mcp_probe")
+	t.Setenv("J_TUI_MCP_EXTRA_TOOL_NAME", "mcp_hidden")
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeConfig(t, path, fmt.Sprintf(`{
+		"defaultProfile": "unused",
+		"profiles": {
+			"unused": {
+				"provider": "not-used-by-tool-list",
+				"model": "not-used",
+				"baseURL": "https://not-used.invalid"
+			}
+		},
+		"extensions": {
+			"mcp": {
+				"servers": {
+					"probe": {
+						"command": %q,
+						"args": ["-test.run=^TestMCPStdioHelper$"],
+						"env": [
+							"J_TUI_MCP_TEST_SERVER",
+							"J_TUI_MCP_TOOL_NAME",
+							"J_TUI_MCP_EXTRA_TOOL_NAME"
+						],
+						"tools": ["mcp_probe"]
+					}
+				}
+			}
+		}
+	}`, os.Args[0]))
+
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{
+		"--config", path,
+		"--list-tools",
+	}, &output); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(output.String()), "\n")
+	want := [][]string{
+		{"SERVER", "TOOL", "SELECTED"},
+		{"probe", "mcp_hidden", "no"},
+		{"probe", "mcp_probe", "yes"},
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("tool list:\n%s", output.String())
+	}
+	for index, line := range lines {
+		if !reflect.DeepEqual(strings.Fields(line), want[index]) {
+			t.Fatalf("line %d=%q, want %v", index, line, want[index])
+		}
+	}
+}
+
+func TestParseConfigRejectsListToolsWithConversationArguments(t *testing.T) {
+	home := isolateConfig(t)
+	path := filepath.Join(home, ".j", "config.json")
+	writeConfig(t, path, `{
+		"defaultProfile": "local",
+		"profiles": {
+			"local": {
+				"provider": "openai",
+				"model": "local",
+				"baseURL": "http://127.0.0.1:8000/v1"
+			}
+		},
+		"extensions": {
+			"mcp": {
+				"servers": {"probe": {"command": "mcp-probe"}}
+			}
+		}
+	}`)
+	for name, args := range map[string][]string{
+		"prompt":  {"--list-tools", "hello"},
+		"mode":    {"--list-tools", "--mode", "json"},
+		"session": {"--list-tools", "--session", "project-j"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseConfig(args); err == nil {
+				t.Fatal("incompatible list-tools arguments were accepted")
+			}
+		})
+	}
+}
+
 func TestRunJSONTracksAzureOpenAICompletionsEvents(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv("GPT_5_5_API_KEY", "secret")

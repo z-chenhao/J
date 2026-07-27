@@ -29,6 +29,13 @@ type runtimeComposition struct {
 	history     []agent.Message
 	transcripts *transcript.Store
 	connections []*jmcp.Connection
+	mcpTools    []mcpToolObservation
+}
+
+type mcpToolObservation struct {
+	Server   string
+	Name     string
+	Selected bool
 }
 
 func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error) {
@@ -40,23 +47,25 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		}
 	}()
 
-	shell, err := bashtool.New(".")
-	if err != nil {
-		return nil, fmt.Errorf("initialize bash tool: %w", err)
-	}
 	names := make(map[string]string)
-	if err := composition.addTools(names, "J-agent", shell); err != nil {
-		return nil, err
-	}
-
-	if cfg.memory != nil && cfg.memory.LongTerm != nil {
-		path := resolveStatePath(cfg.configPath, cfg.memory.LongTerm.Path)
-		log, err := memory.Open(path)
+	if !cfg.listTools {
+		shell, err := bashtool.New(".")
 		if err != nil {
-			return nil, fmt.Errorf("initialize long-term memory: %w", err)
+			return nil, fmt.Errorf("initialize bash tool: %w", err)
 		}
-		if err := composition.addTools(names, "J-mem", log.Tools()...); err != nil {
+		if err := composition.addTools(names, "J-agent", shell); err != nil {
 			return nil, err
+		}
+
+		if cfg.memory != nil && cfg.memory.LongTerm != nil {
+			path := resolveStatePath(cfg.configPath, cfg.memory.LongTerm.Path)
+			log, err := memory.Open(path)
+			if err != nil {
+				return nil, fmt.Errorf("initialize long-term memory: %w", err)
+			}
+			if err := composition.addTools(names, "J-mem", log.Tools()...); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -83,13 +92,22 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 			if err != nil {
 				return nil, fmt.Errorf("load MCP server %q tools: %w", serverName, err)
 			}
-			if err := composition.addTools(names, "MCP server "+serverName, tools...); err != nil {
+			selected, observations, err := selectMCPTools(serverName, server.Tools, tools)
+			if err != nil {
+				return nil, err
+			}
+			composition.mcpTools = append(composition.mcpTools, observations...)
+			if err := composition.addTools(
+				names,
+				"MCP server "+serverName,
+				selected...,
+			); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	if cfg.session != "" {
+	if !cfg.listTools && cfg.session != "" {
 		if cfg.memory == nil || cfg.memory.Transcript == nil {
 			return nil, errors.New("transcript session requires memory.transcript")
 		}
@@ -111,6 +129,67 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 
 	succeeded = true
 	return composition, nil
+}
+
+func selectMCPTools(
+	serverName string,
+	allowlist []string,
+	tools []agent.Tool,
+) ([]agent.Tool, []mcpToolObservation, error) {
+	available := make(map[string]agent.Tool, len(tools))
+	for _, tool := range tools {
+		if tool == nil {
+			return nil, nil, fmt.Errorf("MCP server %q returned a nil tool", serverName)
+		}
+		name := tool.Spec().Name
+		available[name] = tool
+	}
+
+	selectedNames := make(map[string]struct{}, len(allowlist))
+	if allowlist == nil {
+		for name := range available {
+			selectedNames[name] = struct{}{}
+		}
+	} else {
+		missing := make([]string, 0)
+		for _, name := range allowlist {
+			if _, exists := available[name]; !exists {
+				missing = append(missing, name)
+				continue
+			}
+			selectedNames[name] = struct{}{}
+		}
+		if len(missing) > 0 {
+			availableNames := make([]string, 0, len(available))
+			for name := range available {
+				availableNames = append(availableNames, name)
+			}
+			sort.Strings(missing)
+			sort.Strings(availableNames)
+			return nil, nil, fmt.Errorf(
+				"MCP server %q configured unknown tools %q; available tools: %q",
+				serverName,
+				missing,
+				availableNames,
+			)
+		}
+	}
+
+	selected := make([]agent.Tool, 0, len(selectedNames))
+	observations := make([]mcpToolObservation, 0, len(tools))
+	for _, tool := range tools {
+		name := tool.Spec().Name
+		_, enabled := selectedNames[name]
+		observations = append(observations, mcpToolObservation{
+			Server:   serverName,
+			Name:     name,
+			Selected: enabled,
+		})
+		if enabled {
+			selected = append(selected, tool)
+		}
+	}
+	return selected, observations, nil
 }
 
 func (composition *runtimeComposition) addTools(

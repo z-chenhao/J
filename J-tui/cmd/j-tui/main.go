@@ -9,8 +9,10 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
+	"text/tabwriter"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -24,6 +26,7 @@ type config struct {
 	configPath      string
 	profile         string
 	initConfig      bool
+	listTools       bool
 	mode            string
 	provider        string
 	api             string
@@ -63,6 +66,16 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 			cfg.configPath,
 		)
 		return err
+	}
+	if cfg.listTools {
+		composition, err := composeRuntime(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			runErr = errors.Join(runErr, composition.Close())
+		}()
+		return writeMCPToolList(out, composition.mcpTools)
 	}
 	model, err := buildModel(cfg)
 	if err != nil {
@@ -121,6 +134,12 @@ func parseConfig(args []string) (config, error) {
 	flags.StringVar(&values.configPath, "config", "", "configuration file path")
 	flags.StringVar(&values.profile, "profile", "", "named model profile")
 	flags.BoolVar(&values.initConfig, "init-config", false, "create a starter configuration and exit")
+	flags.BoolVar(
+		&values.listTools,
+		"list-tools",
+		false,
+		"list configured MCP tools and selection state, then exit",
+	)
 	flags.StringVar(&values.mode, "mode", "tui", "output mode: tui or json")
 	flags.StringVar(&values.provider, "provider", "", "model provider: openai")
 	flags.StringVar(
@@ -185,6 +204,9 @@ func parseConfig(args []string) (config, error) {
 		if visited["session"] {
 			return config{}, errors.New("--init-config does not accept --session")
 		}
+		if values.listTools {
+			return config{}, errors.New("--init-config does not accept --list-tools")
+		}
 		return config{
 			configPath: configPath,
 			initConfig: true,
@@ -194,6 +216,7 @@ func parseConfig(args []string) (config, error) {
 
 	cfg := config{
 		configPath:      configPath,
+		listTools:       values.listTools,
 		mode:            "tui",
 		provider:        "openai",
 		api:             string(openai.APICompletions),
@@ -244,6 +267,21 @@ func parseConfig(args []string) (config, error) {
 	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
 	cfg.session = strings.TrimSpace(cfg.session)
+	if cfg.listTools {
+		if len(cfg.prompts) > 0 {
+			return config{}, errors.New("--list-tools does not accept a prompt")
+		}
+		if visited["mode"] {
+			return config{}, errors.New("--list-tools does not accept --mode")
+		}
+		if cfg.session != "" {
+			return config{}, errors.New("--list-tools does not accept --session")
+		}
+		if cfg.extensions == nil || cfg.extensions.MCP == nil {
+			return config{}, errors.New("--list-tools requires extensions.mcp in the configuration")
+		}
+		return cfg, nil
+	}
 	if cfg.api == "" {
 		cfg.api = string(openai.APICompletions)
 	}
@@ -310,6 +348,47 @@ func parseConfig(args []string) (config, error) {
 		)
 	}
 	return cfg, nil
+}
+
+func writeMCPToolList(out io.Writer, observations []mcpToolObservation) error {
+	sort.Slice(observations, func(left, right int) bool {
+		if observations[left].Server == observations[right].Server {
+			return observations[left].Name < observations[right].Name
+		}
+		return observations[left].Server < observations[right].Server
+	})
+	writer := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(writer, "SERVER\tTOOL\tSELECTED"); err != nil {
+		return fmt.Errorf("write MCP tool list: %w", err)
+	}
+	for _, observation := range observations {
+		selected := "no"
+		if observation.Selected {
+			selected = "yes"
+		}
+		if _, err := fmt.Fprintf(
+			writer,
+			"%s\t%s\t%s\n",
+			sanitizeTableCell(observation.Server),
+			sanitizeTableCell(observation.Name),
+			selected,
+		); err != nil {
+			return fmt.Errorf("write MCP tool list: %w", err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		return fmt.Errorf("write MCP tool list: %w", err)
+	}
+	return nil
+}
+
+func sanitizeTableCell(value string) string {
+	return strings.Map(func(character rune) rune {
+		if character < ' ' || character == '\u007f' {
+			return '\uFFFD'
+		}
+		return character
+	}, value)
 }
 
 func loadSettings(path string) (settings.File, bool, error) {

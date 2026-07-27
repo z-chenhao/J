@@ -58,7 +58,8 @@ func TestLoadTypedMCPAndMemoryConfiguration(t *testing.T) {
 						"command": "mcp-server-filesystem",
 						"args": ["/workspace"],
 						"env": ["FILESYSTEM_TOKEN"],
-						"cwd": "servers/filesystem"
+						"cwd": "servers/filesystem",
+						"tools": ["read_file", "list_directory"]
 					}
 				}
 			}
@@ -75,7 +76,8 @@ func TestLoadTypedMCPAndMemoryConfiguration(t *testing.T) {
 	server := file.Extensions.MCP.Servers["filesystem"]
 	if server.Command != "mcp-server-filesystem" ||
 		len(server.Args) != 1 || server.Env[0] != "FILESYSTEM_TOKEN" ||
-		server.CWD != "servers/filesystem" {
+		server.CWD != "servers/filesystem" ||
+		strings.Join(server.Tools, ",") != "read_file,list_directory" {
 		t.Fatalf("server=%#v", server)
 	}
 	if file.Memory.Transcript.Path != "state/transcripts.db" ||
@@ -128,6 +130,21 @@ func TestLoadRejectsInvalidMCPAndMemoryConfiguration(t *testing.T) {
 			"defaultProfile":"local",
 			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
 			"extensions":{"mcp":{"servers":{"x":{"command":"server","env":["TOKEN=secret"]}}}}
+		}`,
+		"empty tool allowlist": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"command":"server","tools":[]}}}}
+		}`,
+		"blank tool name": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"command":"server","tools":[" "]}}}}
+		}`,
+		"duplicate tool name": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"command":"server","tools":["read_file","read_file"]}}}}
 		}`,
 		"empty memory": `{
 			"defaultProfile":"local",

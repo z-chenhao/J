@@ -114,6 +114,74 @@ func TestComposeRuntimeRejectsToolNameCollision(t *testing.T) {
 	}
 }
 
+func TestComposeRuntimeSelectsConfiguredMCPToolsBeforeCollisionChecks(t *testing.T) {
+	t.Setenv("J_TUI_MCP_TEST_SERVER", "1")
+	t.Setenv("J_TUI_MCP_TOOL_NAME", "mcp_probe")
+	t.Setenv("J_TUI_MCP_EXTRA_TOOL_NAME", "bash")
+	composition, err := composeRuntime(context.Background(), config{
+		configPath: filepath.Join(t.TempDir(), "config.json"),
+		extensions: &settings.Extensions{MCP: &settings.MCP{
+			Servers: map[string]settings.MCPServer{
+				"selected": {
+					Command: os.Args[0],
+					Args:    []string{"-test.run=^TestMCPStdioHelper$"},
+					Env: []string{
+						"J_TUI_MCP_TEST_SERVER",
+						"J_TUI_MCP_TOOL_NAME",
+						"J_TUI_MCP_EXTRA_TOOL_NAME",
+					},
+					Tools: []string{"mcp_probe"},
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer composition.Close()
+
+	names := make([]string, 0, len(composition.tools))
+	for _, tool := range composition.tools {
+		names = append(names, tool.Spec().Name)
+	}
+	if strings.Join(names, ",") != "bash,mcp_probe" {
+		t.Fatalf("selected tools=%v", names)
+	}
+	selections := make(map[string]bool, len(composition.mcpTools))
+	for _, observation := range composition.mcpTools {
+		selections[observation.Name] = observation.Selected
+	}
+	if len(selections) != 2 || !selections["mcp_probe"] || selections["bash"] {
+		t.Fatalf("observations=%#v", composition.mcpTools)
+	}
+}
+
+func TestComposeRuntimeRejectsUnknownConfiguredMCPTool(t *testing.T) {
+	t.Setenv("J_TUI_MCP_TEST_SERVER", "1")
+	t.Setenv("J_TUI_MCP_TOOL_NAME", "mcp_probe")
+	_, err := composeRuntime(context.Background(), config{
+		configPath: filepath.Join(t.TempDir(), "config.json"),
+		extensions: &settings.Extensions{MCP: &settings.MCP{
+			Servers: map[string]settings.MCPServer{
+				"probe": {
+					Command: os.Args[0],
+					Args:    []string{"-test.run=^TestMCPStdioHelper$"},
+					Env: []string{
+						"J_TUI_MCP_TEST_SERVER",
+						"J_TUI_MCP_TOOL_NAME",
+					},
+					Tools: []string{"missing"},
+				},
+			},
+		}},
+	})
+	if err == nil ||
+		!strings.Contains(err.Error(), `"missing"`) ||
+		!strings.Contains(err.Error(), `"mcp_probe"`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestPersistentRunnerSavesAndRestoresTranscript(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), ".j", "config.json")
 	cfg := config{
@@ -185,6 +253,17 @@ func TestMCPStdioHelper(t *testing.T) {
 		Name:    "j-tui-mcp-test",
 		Version: "0.1.0",
 	}, nil)
+	addMCPTestTool(server, name)
+	if extra := os.Getenv("J_TUI_MCP_EXTRA_TOOL_NAME"); extra != "" {
+		addMCPTestTool(server, extra)
+	}
+	if err := server.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
+		os.Exit(2)
+	}
+	os.Exit(0)
+}
+
+func addMCPTestTool(server *mcpsdk.Server, name string) {
 	server.AddTool(&mcpsdk.Tool{
 		Name:        name,
 		InputSchema: json.RawMessage(`{"type":"object"}`),
@@ -195,10 +274,6 @@ func TestMCPStdioHelper(t *testing.T) {
 			},
 		}, nil
 	})
-	if err := server.Run(context.Background(), &mcpsdk.StdioTransport{}); err != nil {
-		os.Exit(2)
-	}
-	os.Exit(0)
 }
 
 type mcpCallingModel struct {

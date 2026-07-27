@@ -140,6 +140,11 @@ Add these top-level fields alongside `profiles`:
             "-y",
             "@modelcontextprotocol/server-filesystem",
             "/Users/you/Projects"
+          ],
+          "tools": [
+            "read_file",
+            "list_directory",
+            "search_files"
           ]
         },
         "github": {
@@ -162,10 +167,24 @@ Add these top-level fields alongside `profiles`:
 ```
 
 `extensions.mcp` accepts explicit stdio servers. `command` is required;
-`args`, `env`, and `cwd` are optional. `env` contains environment-variable
-names rather than values. J-tui supplies `PATH`, `HOME`, and available
-operational locale/temp variables, then forwards only the additionally named
-variables. A named variable that is not set fails startup.
+`args`, `env`, `cwd`, and `tools` are optional. `env` contains
+environment-variable names rather than values. J-tui supplies `PATH`, `HOME`,
+and available operational locale/temp variables, then forwards only the
+additionally named variables. A named variable that is not set fails startup.
+
+Omitting `tools` selects every tool advertised by that server. A non-empty
+`tools` array is an exact, case-sensitive allowlist. Startup fails when a named
+tool is not advertised and reports the available names; `tools: []` is rejected
+because omitting the server is the unambiguous way to disable it. Inspect the
+server's advertised tools and current selection without constructing or
+calling a model:
+
+```bash
+j-tui --list-tools
+```
+
+The command starts only the configured MCP servers, prints each tool with a
+`yes` or `no` selection state, then closes the connections.
 
 Relative `cwd` and memory paths are resolved from the directory containing the
 configuration file. With the default `~/.j/config.json`, the example memory
@@ -189,8 +208,8 @@ adds `memory_retrieve`, `memory_store`, `memory_modify`, and `memory_forget` as
 ordinary model-visible Tools backed by inspectable JSONL. Retrieval remains an
 explicit Tool call; J-tui does not inject memory into prompts.
 
-All configured MCP servers initialize before the Agent starts, and their
-advertised Tools remain frozen for that process. A startup failure or a name
+All configured MCP servers initialize before the Agent starts, and the selected
+Tools remain frozen for that process. A startup failure or a selected-name
 collision with Bash, J-mem, or another MCP server fails explicitly. J-tui does
 not install MCP packages, sanitize tool names, retry servers, or silently omit
 failed capabilities.
@@ -282,6 +301,7 @@ The editor uses:
 - `PageUp` and `PageDown` to inspect history without following new output;
 - `Home` to jump to the oldest output;
 - `End` to resume following the newest output;
+- `Ctrl+T` to collapse or expand reasoning blocks;
 - `Ctrl+O` to expand or collapse tool arguments and results;
 - `Esc` to cancel the active run;
 - `Ctrl+C` to exit.
@@ -290,13 +310,14 @@ Mouse reporting is intentionally disabled so the terminal retains native text
 selection and copy. Transcript scrolling stays available through `Alt+Up`,
 `Alt+Down`, `PageUp`, `PageDown`, `Home`, and `End`.
 
-Reasoning deltas update the visible run state but their private content is not
-rendered. The transcript shows only a `Thinking…` presence marker. Assistant
-text streams through a terminal Markdown renderer. Tool cards retain complete
-arguments, results, and failures while keeping a compact default presentation.
-Model duration, first-delta timing, and token usage are rendered from J-agent
-events. A spinner and the editor border color reflect the current run state.
-The editor starts at one row and grows to five rows as content wraps.
+Reasoning deltas stream into muted italic Markdown blocks by default. `Ctrl+T`
+collapses or expands every reasoning block; collapsed blocks retain a
+`Thinking…` presence marker. Assistant text streams through the same terminal
+Markdown renderer. Tool cards retain complete arguments, results, and failures
+while keeping a compact default presentation. Model duration, first-delta
+timing, and token usage are rendered from J-agent events. A spinner and the
+editor border color reflect the current run state. The editor starts at one row
+and grows to five rows as content wraps.
 
 The renderer follows Bubble Tea v2's terminal lifecycle. `Init` requests the
 background color, Bubble Tea reads the terminal reply inside its event loop,
@@ -345,7 +366,7 @@ The TUI reducer keeps this mapping private to J-tui:
 | J-agent observation | TUI state |
 | --- | --- |
 | `agent.started`, `turn.started` | running, then thinking |
-| reasoning `message.delta` | thinking; content remains hidden |
+| reasoning `message.delta` | thinking; content streams visibly unless collapsed |
 | text `message.delta` | responding with streamed transcript text |
 | tool-call `message.delta` | preparing tool |
 | `tool.started`, `tool.completed` | named tool row with running/result/failure |

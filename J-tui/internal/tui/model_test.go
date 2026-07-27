@@ -62,8 +62,8 @@ func TestApplyEventTracksStreamingReasoningAndTools(t *testing.T) {
 	if model.items[0].kind != itemAssistant || model.items[0].text != "I will check." {
 		t.Fatalf("assistant item = %#v", model.items[0])
 	}
-	if !model.items[0].reasoning {
-		t.Fatalf("assistant reasoning state was not retained: %#v", model.items[0])
+	if model.items[0].reasoning != "consider" {
+		t.Fatalf("assistant reasoning was not retained: %#v", model.items[0])
 	}
 	if model.items[1].kind != itemTool || model.items[1].status != "12ms" ||
 		model.items[1].toolOutput != "tool output" {
@@ -199,6 +199,24 @@ func TestApplyEventRemovesEmptyToolCallMessage(t *testing.T) {
 	}
 }
 
+func TestApplyEventRetainsCompletedReasoningWithoutDeltas(t *testing.T) {
+	model := New(context.Background(), nil, "openai", "non-streaming", "")
+	model.applyEvent(agent.Event{Type: agent.EventMessageStarted})
+	message := agent.Message{
+		Role: agent.RoleAssistant,
+		Content: []agent.Content{
+			{Type: agent.ContentReasoning, Text: "Inspect the evidence."},
+			{Type: agent.ContentText, Text: "Complete."},
+		},
+	}
+	model.applyEvent(agent.Event{Type: agent.EventMessageCompleted, Message: &message})
+	if len(model.items) != 1 ||
+		model.items[0].reasoning != "Inspect the evidence." ||
+		model.items[0].text != "Complete." {
+		t.Fatalf("items=%#v", model.items)
+	}
+}
+
 func TestApplyEventShowsToolFailure(t *testing.T) {
 	model := New(context.Background(), nil, "ollama", "qwen", "")
 	call := agent.ToolCall{ID: "call-1", Name: "probe"}
@@ -255,7 +273,14 @@ func TestViewIncludesModelAndControls(t *testing.T) {
 		t.Fatalf("mouse mode=%v, want terminal-native selection", rendered.MouseMode)
 	}
 	view := rendered.Content
-	for _, text := range []string{"ollama/qwen", "enter send", "alt+↑/↓ scroll", "ctrl+o tools", "╭"} {
+	for _, text := range []string{
+		"ollama/qwen",
+		"enter send",
+		"alt+↑/↓ scroll",
+		"ctrl+t thinking",
+		"ctrl+o tools",
+		"╭",
+	} {
 		if !strings.Contains(view, text) {
 			t.Fatalf("view does not contain %q:\n%s", text, view)
 		}
@@ -274,7 +299,11 @@ func TestViewFitsTerminal(t *testing.T) {
 		model := New(context.Background(), nil, "deepseek", "deepseek-v4-flash", "")
 		model.items = append(model.items,
 			transcriptItem{kind: itemUser, text: "render this message"},
-			transcriptItem{kind: itemAssistant, text: "## Result\n\n- one\n- two"},
+			transcriptItem{
+				kind:      itemAssistant,
+				reasoning: strings.Repeat("inspect evidence carefully ", 8),
+				text:      "## Result\n\n- one\n- two",
+			},
 			transcriptItem{
 				kind:          itemTool,
 				toolName:      "probe",
@@ -306,10 +335,13 @@ func TestViewFitsTerminal(t *testing.T) {
 func TestBackgroundColorSelectsStylesWithoutRendererProbe(t *testing.T) {
 	model := New(context.Background(), nil, "ollama", "qwen", "")
 	model.items = append(model.items, transcriptItem{
-		kind:        itemAssistant,
-		text:        "cached",
-		rendered:    "old rendering",
-		renderWidth: 40,
+		kind:           itemAssistant,
+		text:           "cached",
+		reasoning:      "inspect",
+		rendered:       "old rendering",
+		renderWidth:    40,
+		reasoningView:  "old reasoning",
+		reasoningWidth: 40,
 	})
 	darkAccent := model.styles.accentColor
 
@@ -323,8 +355,44 @@ func TestBackgroundColorSelectsStylesWithoutRendererProbe(t *testing.T) {
 	if model.styles.accentColor == darkAccent {
 		t.Fatal("light terminal background retained the dark accent")
 	}
-	if model.items[0].rendered != "" || model.items[0].renderWidth != 0 {
+	if model.items[0].rendered != "" || model.items[0].renderWidth != 0 ||
+		model.items[0].reasoningView != "" || model.items[0].reasoningWidth != 0 {
 		t.Fatalf("cached rendering was not invalidated: %#v", model.items[0])
+	}
+}
+
+func TestReasoningIsVisibleByDefaultAndCtrlTTogglesIt(t *testing.T) {
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	model.items = append(model.items, transcriptItem{
+		kind:      itemAssistant,
+		reasoning: "First inspect the available evidence.",
+		text:      "Final answer.",
+	})
+	model.syncViewport()
+
+	expanded := ansi.Strip(model.renderTranscript())
+	if !strings.Contains(expanded, "First inspect the available evidence.") ||
+		!strings.Contains(expanded, "Final answer.") ||
+		strings.Contains(expanded, "Thinking…") {
+		t.Fatalf("expanded transcript:\n%s", expanded)
+	}
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	model = updated.(Model)
+	collapsed := ansi.Strip(model.renderTranscript())
+	if strings.Contains(collapsed, "First inspect the available evidence.") ||
+		!strings.Contains(collapsed, "Thinking…") ||
+		!strings.Contains(collapsed, "Final answer.") {
+		t.Fatalf("collapsed transcript:\n%s", collapsed)
+	}
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl})
+	model = updated.(Model)
+	if expandedAgain := ansi.Strip(model.renderTranscript()); !strings.Contains(
+		expandedAgain,
+		"First inspect the available evidence.",
+	) {
+		t.Fatalf("re-expanded transcript:\n%s", expandedAgain)
 	}
 }
 

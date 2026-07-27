@@ -32,18 +32,20 @@ const (
 )
 
 type transcriptItem struct {
-	kind          itemKind
-	label         string
-	text          string
-	status        string
-	id            string
-	reasoning     bool
-	toolName      string
-	toolArguments string
-	toolOutput    string
-	toolError     string
-	rendered      string
-	renderWidth   int
+	kind           itemKind
+	label          string
+	text           string
+	status         string
+	id             string
+	reasoning      string
+	toolName       string
+	toolArguments  string
+	toolOutput     string
+	toolError      string
+	rendered       string
+	renderWidth    int
+	reasoningView  string
+	reasoningWidth int
 }
 
 type eventMsg struct {
@@ -75,20 +77,21 @@ type Model struct {
 	width    int
 	height   int
 
-	items          []transcriptItem
-	activeMessage  int
-	activeTools    map[string]int
-	reasoningBytes int
-	status         string
-	runMetrics     runMetrics
-	running        bool
-	cancel         context.CancelFunc
-	events         chan tea.Msg
-	initialPrompt  string
-	followOutput   bool
-	toolsExpanded  bool
-	isDark         bool
-	styles         styles
+	items            []transcriptItem
+	activeMessage    int
+	activeTools      map[string]int
+	reasoningBytes   int
+	status           string
+	runMetrics       runMetrics
+	running          bool
+	cancel           context.CancelFunc
+	events           chan tea.Msg
+	initialPrompt    string
+	followOutput     bool
+	toolsExpanded    bool
+	thinkingExpanded bool
+	isDark           bool
+	styles           styles
 }
 
 // New constructs a TUI that renders one runner conversation.
@@ -124,22 +127,23 @@ func New(ctx context.Context, runner runner, provider, model, initialPrompt stri
 	progress.Style = styleSet.accent
 
 	result := Model{
-		ctx:           ctx,
-		runner:        runner,
-		provider:      provider,
-		model:         model,
-		input:         input,
-		viewport:      view,
-		spinner:       progress,
-		width:         80,
-		height:        24,
-		activeMessage: -1,
-		activeTools:   make(map[string]int),
-		status:        "ready",
-		initialPrompt: strings.TrimSpace(initialPrompt),
-		followOutput:  true,
-		isDark:        defaultDarkBackground,
-		styles:        styleSet,
+		ctx:              ctx,
+		runner:           runner,
+		provider:         provider,
+		model:            model,
+		input:            input,
+		viewport:         view,
+		spinner:          progress,
+		width:            80,
+		height:           24,
+		activeMessage:    -1,
+		activeTools:      make(map[string]int),
+		status:           "ready",
+		initialPrompt:    strings.TrimSpace(initialPrompt),
+		followOutput:     true,
+		thinkingExpanded: true,
+		isDark:           defaultDarkBackground,
+		styles:           styleSet,
 	}
 	result.resize()
 	result.syncViewport()
@@ -200,6 +204,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+o":
 			m.toolsExpanded = !m.toolsExpanded
+			m.syncViewport()
+			return m, nil
+		case "ctrl+t":
+			m.thinkingExpanded = !m.thinkingExpanded
 			m.syncViewport()
 			return m, nil
 		case "home":
@@ -343,7 +351,8 @@ func (m *Model) applyEvent(event agent.Event) {
 			m.status = "thinking"
 			m.reasoningBytes += len(event.Delta.Delta)
 			if m.activeMessage >= 0 {
-				m.items[m.activeMessage].reasoning = true
+				m.items[m.activeMessage].reasoning += event.Delta.Delta
+				m.items[m.activeMessage].reasoningWidth = 0
 			}
 		case agent.DeltaToolCall:
 			m.status = "preparing tool"
@@ -354,8 +363,14 @@ func (m *Model) applyEvent(event agent.Event) {
 				m.items[m.activeMessage].text = event.Message.Text()
 				m.items[m.activeMessage].renderWidth = 0
 			}
+			if event.Message != nil &&
+				m.items[m.activeMessage].reasoning == "" {
+				m.items[m.activeMessage].reasoning = messageReasoning(*event.Message)
+				m.items[m.activeMessage].reasoningWidth = 0
+			}
 			m.items[m.activeMessage].status = ""
-			if m.items[m.activeMessage].text == "" && !m.items[m.activeMessage].reasoning {
+			if m.items[m.activeMessage].text == "" &&
+				strings.TrimSpace(m.items[m.activeMessage].reasoning) == "" {
 				m.items = append(m.items[:m.activeMessage], m.items[m.activeMessage+1:]...)
 			}
 		}
@@ -409,6 +424,17 @@ func (m *Model) applyEvent(event agent.Event) {
 			})
 		}
 	}
+}
+
+func messageReasoning(message agent.Message) string {
+	var blocks []string
+	for _, content := range message.Content {
+		if content.Type == agent.ContentReasoning &&
+			strings.TrimSpace(content.Text) != "" {
+			blocks = append(blocks, content.Text)
+		}
+	}
+	return strings.Join(blocks, "\n\n")
 }
 
 func (metrics *runMetrics) add(observation agent.ModelObservation) {
@@ -552,11 +578,15 @@ func (m *Model) ensureRendered() {
 		if item.kind == itemUser {
 			width = max(m.viewport.Width()-6, 20)
 		}
-		if item.renderWidth == width && (item.rendered != "" || item.text == "") {
-			continue
+		if item.renderWidth != width || (item.rendered == "" && item.text != "") {
+			item.rendered = m.renderMarkdown(item.text, width)
+			item.renderWidth = width
 		}
-		item.rendered = m.renderMarkdown(item.text, width)
-		item.renderWidth = width
+		if item.reasoningWidth != width ||
+			(item.reasoningView == "" && item.reasoning != "") {
+			item.reasoningView = m.renderReasoning(item.reasoning, width)
+			item.reasoningWidth = width
+		}
 	}
 }
 
@@ -571,6 +601,8 @@ func (m *Model) applyBackground(isDark bool) {
 	for index := range m.items {
 		m.items[index].rendered = ""
 		m.items[index].renderWidth = 0
+		m.items[index].reasoningView = ""
+		m.items[index].reasoningWidth = 0
 	}
 }
 

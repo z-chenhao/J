@@ -252,11 +252,11 @@ deliberately absent.
 
 The first implementation uses existing start/delta/completed events. Its
 private reducer maps them to `thinking`, `responding`, `tool`, `completed`,
-`failed`, and `canceled` display states. Reasoning content is retained by the
-runtime but only its presence is displayed. J-tui privately owns Markdown
-rendering, tool-card expansion, run-state colors, and whether a manually
-scrolled viewport follows new output. `--mode json` exposes an experimental
-JSON projection of the same event input for event-order diagnostics.
+`failed`, and `canceled` display states. J-tui displays reasoning content by
+default and privately owns its collapse policy, Markdown rendering, tool-card
+expansion, run-state colors, and whether a manually scrolled viewport follows
+new output. `--mode json` exposes an experimental JSON projection of the same
+event input for event-order diagnostics.
 
 The current terminal policy follows Bubble Tea v2's event-loop-owned background
 query, maps the observed result to one of two private palettes, and uses
@@ -411,8 +411,9 @@ Potential future mechanisms must be validated in this order:
 2. Keep the text-only J-tui and JSON event trace passing against current events.
 3. Keep J-mcp's real stdio, cancellation, and J-agent integration tests
    passing.
-4. Keep J-tui's typed MCP host, collision checks, environment forwarding, and
-   shutdown tests passing.
+4. Keep J-tui's typed MCP host, exact construction-time tool selection,
+   discovery audit, collision checks, environment forwarding, and shutdown
+   tests passing.
 5. Keep J-mem's SQLite transcript round-trip and four JSONL memory Tools
    passing through J-tui's separate memory lifecycle.
 6. Validate provider-backed MCP calls as operational smoke tests without a

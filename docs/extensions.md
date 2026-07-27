@@ -174,8 +174,11 @@ The first implementation accepts only explicit stdio servers:
 
 Rules:
 
-- `command` is required; `args`, `env`, and `cwd` are optional.
+- `command` is required; `args`, `env`, `cwd`, and `tools` are optional.
 - `env` contains environment-variable names, never secret values.
+- omitted `tools` selects every advertised tool; a non-empty array is an exact,
+  case-sensitive allowlist.
+- an empty allowlist or a name not advertised by that server fails explicitly.
 - the host supplies a documented minimal process environment and forwards only
   the additionally named variables.
 - relative `cwd` is resolved from the configuration file's directory.
@@ -186,8 +189,11 @@ Rules:
   it; independent Go consumers may supply an official SDK transport directly.
 
 The schema is executable. J-tui sorts server IDs for deterministic startup,
-freezes their Tools, rejects collisions across Bash, J-mem, and every MCP
-server, and closes initialized connections in reverse order.
+discovers each server's complete tool set through J-mcp, applies its private
+construction-time allowlist, freezes the selected Tools, rejects selected-name
+collisions across Bash, J-mem, and every MCP server, and closes initialized
+connections in reverse order. `j-tui --list-tools` exposes the advertised and
+selected names for configuration audit without constructing a model.
 
 ## Tool projection
 

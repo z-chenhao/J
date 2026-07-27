@@ -98,18 +98,17 @@ func (m Model) View() tea.View {
 
 func (m Model) help() string {
 	candidates := []string{
-		"enter send  ctrl+j newline  alt+↑/↓ scroll  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
-		"enter send  alt+↑/↓ scroll  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
-		"enter send  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
-		"enter send  pgup/pgdn page  ctrl+o tools  esc cancel",
-		"enter send  ctrl+o tools  esc cancel",
+		"enter send  ctrl+j newline  alt+↑/↓ scroll  pgup/pgdn page  ctrl+t thinking  ctrl+o tools  esc cancel  ctrl+c quit",
+		"enter send  alt+↑/↓ scroll  pgup/pgdn page  ctrl+t thinking  ctrl+o tools  esc cancel",
+		"enter send  pgup/pgdn page  ctrl+t thinking  ctrl+o tools  esc cancel  ctrl+c quit",
+		"enter send  ctrl+t thinking  ctrl+o tools  esc cancel",
+		"ctrl+t thinking  ctrl+o tools  esc cancel",
 	}
 	if m.running {
 		candidates = []string{
-			"alt+↑/↓ scroll  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
-			"pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
-			"pgup/pgdn page  ctrl+o tools  esc cancel",
-			"ctrl+o tools  esc cancel",
+			"alt+↑/↓ scroll  pgup/pgdn page  ctrl+t thinking  ctrl+o tools  esc cancel  ctrl+c quit",
+			"pgup/pgdn page  ctrl+t thinking  ctrl+o tools  esc cancel  ctrl+c quit",
+			"ctrl+t thinking  ctrl+o tools  esc cancel",
 		}
 	}
 	available := max(m.width-4, 20)
@@ -141,8 +140,16 @@ func (m Model) renderTranscript() string {
 				Render(content))
 		case itemAssistant:
 			var sections []string
-			if item.reasoning {
-				sections = append(sections, m.styles.thinking.Render("Thinking…"))
+			if strings.TrimSpace(item.reasoning) != "" {
+				if m.thinkingExpanded {
+					content := item.reasoningView
+					if content == "" {
+						content = safeTerminalText(item.reasoning)
+					}
+					sections = append(sections, m.styles.thinking.Render(content))
+				} else {
+					sections = append(sections, m.styles.thinking.Render("Thinking…"))
+				}
 			}
 			if strings.TrimSpace(item.text) != "" {
 				content := item.rendered
@@ -182,6 +189,15 @@ func (m Model) renderMarkdown(text string, width int) string {
 		return text
 	}
 	return strings.Trim(rendered, "\n")
+}
+
+func (m Model) renderReasoning(text string, width int) string {
+	if strings.TrimSpace(text) == "" {
+		return ""
+	}
+	// Keep reasoning visually subordinate while retaining Markdown's layout and
+	// wrapping. The thinking style is applied after rendering.
+	return ansi.Strip(m.renderMarkdown(text, width))
 }
 
 func (m Model) renderTool(item transcriptItem) string {
