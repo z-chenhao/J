@@ -162,7 +162,7 @@ func TestViewIncludesModelAndControls(t *testing.T) {
 		t.Fatalf("mouse mode=%v, want terminal-native selection", rendered.MouseMode)
 	}
 	view := rendered.Content
-	for _, text := range []string{"ollama/qwen", "enter send", "ctrl+j newline", "ctrl+o tools", "╭"} {
+	for _, text := range []string{"ollama/qwen", "enter send", "alt+↑/↓ scroll", "ctrl+o tools", "╭"} {
 		if !strings.Contains(view, text) {
 			t.Fatalf("view does not contain %q:\n%s", text, view)
 		}
@@ -330,5 +330,42 @@ func TestSyncViewportPreservesManualScroll(t *testing.T) {
 	model.syncViewport()
 	if model.viewport.YOffset() != 0 {
 		t.Fatalf("manual scroll moved to %d", model.viewport.YOffset())
+	}
+}
+
+func TestTranscriptScrollKeysUseViewportKeyMap(t *testing.T) {
+	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model.viewport.SetHeight(4)
+	model.viewport.SetContent(strings.Repeat("line\n", 20))
+	model.viewport.GotoBottom()
+	bottom := model.viewport.YOffset()
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModAlt})
+	model = updated.(Model)
+	if model.viewport.YOffset() != bottom-1 {
+		t.Fatalf("alt+up offset=%d, want %d", model.viewport.YOffset(), bottom-1)
+	}
+	if model.followOutput {
+		t.Fatal("alt+up should stop following output")
+	}
+
+	updated, _ = model.Update(tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModAlt})
+	model = updated.(Model)
+	if model.viewport.YOffset() != bottom {
+		t.Fatalf("alt+down offset=%d, want %d", model.viewport.YOffset(), bottom)
+	}
+	if !model.followOutput {
+		t.Fatal("alt+down at bottom should resume following output")
+	}
+}
+
+func TestEditorRetainsCtrlUDeleteBinding(t *testing.T) {
+	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model.input.SetValue("draft")
+
+	updated, _ := model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	model = updated.(Model)
+	if model.input.Value() != "" {
+		t.Fatalf("ctrl+u left input=%q", model.input.Value())
 	}
 }

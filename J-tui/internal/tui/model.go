@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
@@ -100,6 +101,14 @@ func New(ctx context.Context, runner runner, provider, model, initialPrompt stri
 	input.Focus()
 
 	view := viewport.New(viewport.WithWidth(80), viewport.WithHeight(16))
+	view.KeyMap.PageUp.SetKeys("pgup")
+	view.KeyMap.PageDown.SetKeys("pgdown")
+	view.KeyMap.HalfPageUp.Unbind()
+	view.KeyMap.HalfPageDown.Unbind()
+	view.KeyMap.Up.SetKeys("alt+up")
+	view.KeyMap.Down.SetKeys("alt+down")
+	view.KeyMap.Left.Unbind()
+	view.KeyMap.Right.Unbind()
 
 	progress := spinner.New()
 	progress.Spinner = spinner.Dot
@@ -157,6 +166,18 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyPressMsg:
+		if key.Matches(
+			msg,
+			m.viewport.KeyMap.PageUp,
+			m.viewport.KeyMap.PageDown,
+			m.viewport.KeyMap.Up,
+			m.viewport.KeyMap.Down,
+		) {
+			var cmd tea.Cmd
+			m.viewport, cmd = m.viewport.Update(msg)
+			m.followOutput = m.viewport.AtBottom()
+			return m, cmd
+		}
 		switch msg.String() {
 		case "ctrl+c":
 			if m.cancel != nil {
@@ -173,11 +194,10 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 			m.toolsExpanded = !m.toolsExpanded
 			m.syncViewport()
 			return m, nil
-		case "pgup", "pgdown", "home":
-			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			m.followOutput = m.viewport.AtBottom()
-			return m, cmd
+		case "home":
+			m.viewport.GotoTop()
+			m.followOutput = false
+			return m, nil
 		case "end":
 			m.viewport.GotoBottom()
 			m.followOutput = true

@@ -200,15 +200,18 @@ The editor uses:
 
 - `Enter` to submit;
 - `Ctrl+J` to insert a newline;
+- `Alt+Up` and `Alt+Down` to scroll the transcript one line without taking
+  the arrow keys away from input editing;
 - `PageUp` and `PageDown` to inspect history without following new output;
+- `Home` to jump to the oldest output;
 - `End` to resume following the newest output;
 - `Ctrl+O` to expand or collapse tool arguments and results;
 - `Esc` to cancel the active run;
 - `Ctrl+C` to exit.
 
 Mouse reporting is intentionally disabled so the terminal retains native text
-selection and copy. Transcript scrolling stays available through `PageUp`,
-`PageDown`, `Home`, and `End`.
+selection and copy. Transcript scrolling stays available through `Alt+Up`,
+`Alt+Down`, `PageUp`, `PageDown`, `Home`, and `End`.
 
 Reasoning deltas update the visible run state but their private content is not
 rendered. The transcript shows only a `Thinking…` presence marker. Assistant

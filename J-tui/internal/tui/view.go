@@ -91,22 +91,24 @@ func (m Model) View() tea.View {
 	))
 	view.AltScreen = true
 	// Preserve the terminal's native drag selection and copy behavior. Transcript
-	// scrolling remains keyboard-owned through PageUp, PageDown, Home, and End.
+	// scrolling remains keyboard-owned through Alt+Up/Down and pager keys.
 	view.MouseMode = tea.MouseModeNone
 	return view
 }
 
 func (m Model) help() string {
 	candidates := []string{
-		"enter send  ctrl+j newline  pgup/pgdn scroll  ctrl+o tools  esc cancel  ctrl+c quit",
-		"enter send  pgup/pgdn scroll  ctrl+o tools  esc cancel  ctrl+c quit",
-		"enter send  pgup/pgdn scroll  ctrl+o tools  esc cancel",
+		"enter send  ctrl+j newline  alt+↑/↓ scroll  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
+		"enter send  alt+↑/↓ scroll  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
+		"enter send  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
+		"enter send  pgup/pgdn page  ctrl+o tools  esc cancel",
 		"enter send  ctrl+o tools  esc cancel",
 	}
 	if m.running {
 		candidates = []string{
-			"pgup/pgdn scroll  ctrl+o tools  esc cancel  ctrl+c quit",
-			"pgup/pgdn scroll  ctrl+o tools  esc cancel",
+			"alt+↑/↓ scroll  pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
+			"pgup/pgdn page  ctrl+o tools  esc cancel  ctrl+c quit",
+			"pgup/pgdn page  ctrl+o tools  esc cancel",
 			"ctrl+o tools  esc cancel",
 		}
 	}
