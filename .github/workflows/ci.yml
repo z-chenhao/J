@@ -26,6 +26,8 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           (cd J-agent && govulncheck ./...)
+          (cd J-mcp && govulncheck ./...)
+          (cd J-mem && govulncheck ./...)
           (cd J-tui && govulncheck ./...)
 
   container:
