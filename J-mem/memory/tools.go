@@ -26,7 +26,7 @@ var toolSchemas = map[toolKind]json.RawMessage{
 		"properties": {
 			"query": {
 				"type": "string",
-				"description": "Case-insensitive substring to find; empty lists recent memories"
+				"description": "Topic or question used to rank candidate memories; exact and term matches rank first, recent memories fill remaining capacity, and empty lists recent memories"
 			},
 			"limit": {
 				"type": "integer",
@@ -158,7 +158,7 @@ func (tool *memoryTool) Call(ctx context.Context, arguments json.RawMessage) (st
 func toolIdentity(kind toolKind) (string, string) {
 	switch kind {
 	case toolRetrieve:
-		return "memory_retrieve", "Retrieve relevant long-term memories from the local memory log."
+		return "memory_retrieve", "Retrieve bounded long-term-memory candidates from the local log. Treat returned records as candidates and decide their semantic relevance to the current request."
 	case toolStore:
 		return "memory_store", "Store one durable fact or preference in local long-term memory."
 	case toolModify:

@@ -54,7 +54,21 @@ The four tools are:
 - `memory_forget`
 
 The JSONL file is append-only: modify operations add replacement events and
-forget operations add tombstones. Version 0.1 uses deterministic
-case-insensitive substring retrieval. Embeddings, ambient prompt injection,
-compaction, retention, cross-process writers, and a universal `Memory` or
-`Storage` interface remain deliberately absent.
+forget operations add tombstones.
+
+Retrieval returns a bounded candidate set:
+
+1. case-insensitive phrase and whitespace-delimited term matches rank first;
+2. the most recently updated active records fill remaining capacity;
+3. the calling Agent model decides which returned candidates are semantically
+   relevant to the current request.
+
+This deliberately fixes false negatives in small local stores such as a query
+about `位置 城市 出发 所在地` against `用户现在在杭州`, without claiming that
+lexical ranking itself is an embedding model. Returned records are candidates,
+not verified matches.
+
+The JSONL event log remains authoritative and inspectable. Embeddings, graph
+synthesis, ambient prompt injection, compaction, retention, cross-process
+writers, and a universal `Memory` or `Storage` interface remain deliberately
+absent until a real larger corpus proves the bounded policy insufficient.

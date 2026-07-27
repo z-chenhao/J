@@ -84,8 +84,10 @@ func Open(path string) (*Log, error) {
 	return log, nil
 }
 
-// Retrieve returns active memories whose content contains query,
-// case-insensitively, ordered by most recent update.
+// Retrieve returns bounded candidate memories for model-side relevance
+// selection. Case-insensitive phrase and term matches rank first; the most
+// recently updated active memories fill any remaining capacity. An empty query
+// lists recent memories.
 func (log *Log) Retrieve(ctx context.Context, query string, limit int) ([]Record, error) {
 	if err := validateLog(log, ctx); err != nil {
 		return nil, err
@@ -108,31 +110,77 @@ func (log *Log) Retrieve(ctx context.Context, query string, limit int) ([]Record
 		return nil, err
 	}
 	needle := strings.ToLower(query)
-	matches := make([]materializedRecord, 0, len(state))
+	terms := queryTerms(needle)
+	candidates := make([]retrievalCandidate, 0, len(state))
 	for _, current := range state {
 		if !current.active {
 			continue
 		}
-		if needle == "" || strings.Contains(strings.ToLower(current.record.Content), needle) {
-			matches = append(matches, current)
-		}
+		content := strings.ToLower(current.record.Content)
+		candidates = append(candidates, retrievalCandidate{
+			materializedRecord: current,
+			score:              lexicalScore(content, needle, terms),
+		})
 	}
-	sort.Slice(matches, func(left, right int) bool {
-		leftTime := matches[left].record.UpdatedAt
-		rightTime := matches[right].record.UpdatedAt
+	sort.Slice(candidates, func(left, right int) bool {
+		if candidates[left].score != candidates[right].score {
+			return candidates[left].score > candidates[right].score
+		}
+		leftTime := candidates[left].record.UpdatedAt
+		rightTime := candidates[right].record.UpdatedAt
 		if leftTime.Equal(rightTime) {
-			return matches[left].sequence > matches[right].sequence
+			return candidates[left].sequence > candidates[right].sequence
 		}
 		return leftTime.After(rightTime)
 	})
-	if len(matches) > limit {
-		matches = matches[:limit]
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
 	}
-	records := make([]Record, len(matches))
-	for index, current := range matches {
+	records := make([]Record, len(candidates))
+	for index, current := range candidates {
 		records[index] = current.record
 	}
 	return records, nil
+}
+
+type retrievalCandidate struct {
+	materializedRecord
+	score int
+}
+
+func queryTerms(query string) []string {
+	if query == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	terms := make([]string, 0)
+	for _, term := range strings.Fields(query) {
+		if term == query || len(term) < 2 {
+			continue
+		}
+		if _, exists := seen[term]; exists {
+			continue
+		}
+		seen[term] = struct{}{}
+		terms = append(terms, term)
+	}
+	return terms
+}
+
+func lexicalScore(content, query string, terms []string) int {
+	if query == "" {
+		return 0
+	}
+	if strings.Contains(content, query) {
+		return 1 + len(terms)
+	}
+	score := 0
+	for _, term := range terms {
+		if strings.Contains(content, term) {
+			score++
+		}
+	}
+	return score
 }
 
 // Store appends one new long-term memory.

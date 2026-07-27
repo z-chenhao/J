@@ -56,7 +56,7 @@ func TestLogStoreModifyRetrieveForget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(records) != 1 || records[0].ID != first.ID {
+	if len(records) != 2 || records[0].ID != first.ID {
 		t.Fatalf("unexpected retrieval: %+v", records)
 	}
 	recent, err := log.Retrieve(context.Background(), "", 1)
@@ -99,6 +99,65 @@ func TestLogStoreModifyRetrieveForget(t *testing.T) {
 	}
 	if lines != 4 {
 		t.Fatalf("got %d JSONL events, want 4", lines)
+	}
+}
+
+func TestRetrieveRanksLexicalMatchesThenFillsRecentCandidates(t *testing.T) {
+	log, err := Open(filepath.Join(t.TempDir(), "memory.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	times := []time.Time{
+		time.Date(2026, 7, 27, 1, 0, 0, 0, time.UTC),
+		time.Date(2026, 7, 27, 2, 0, 0, 0, time.UTC),
+		time.Date(2026, 7, 27, 3, 0, 0, 0, time.UTC),
+	}
+	log.now = func() time.Time {
+		next := times[0]
+		times = times[1:]
+		return next
+	}
+
+	_, err = log.Store(context.Background(), "用户的名字是朱晨浩")
+	if err != nil {
+		t.Fatal(err)
+	}
+	location, err := log.Store(context.Background(), "用户现在在杭州")
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := log.Store(context.Background(), "Project J uses Go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := log.Retrieve(
+		context.Background(),
+		"位置 城市 出发 所在地",
+		2,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 2 {
+		t.Fatalf("got %d candidates, want 2: %+v", len(candidates), candidates)
+	}
+	foundLocation := false
+	for _, candidate := range candidates {
+		if candidate.ID == location.ID {
+			foundLocation = true
+		}
+	}
+	if !foundLocation {
+		t.Fatalf("semantic candidate recall omitted location memory: %+v", candidates)
+	}
+
+	ranked, err := log.Retrieve(context.Background(), "Project 城市", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ranked) != 2 || ranked[0].ID != project.ID {
+		t.Fatalf("lexical match was not ranked first: %+v", ranked)
 	}
 }
 
