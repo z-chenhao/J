@@ -231,7 +231,9 @@ DeepSeek context caching requires no new runtime mechanism: the service enables
 it automatically, and J-agent's ordered transcript makes each new turn an
 extension of the prior request prefix. Provider-reported cached input tokens
 remain ordinary `Usage`; J-tui may derive and display cache misses from total
-input minus cached input. Cache policy and storage remain provider-owned.
+input minus cached input. J-tui aggregates complete usage across the current
+run and preserves an unknown optional breakdown when any model turn omits it.
+Cache policy and storage remain provider-owned.
 
 It owns rendering, key bindings, terminal state, input editing, and UI-specific
 metadata. J-agent must not gain labels, colors, widgets, or TUI component types
@@ -287,24 +289,42 @@ Ambient retrieval or context injection should wait until the tool-based design
 proves insufficient. If required, a model wrapper should be tried before
 adding a runtime Hook.
 
-## 8. Planned external modules
+## 8. Extension composition
+
+The current MCP requirement does not justify a universal Extension API.
+J-agent already has the required stable mechanism: construction-time Tools.
+The first extension host therefore belongs privately to J-tui, and the planned
+J-mcp module will initialize configured MCP servers and project their tools to
+`agent.Tool` before the Agent is constructed.
+
+The experimental [J Extension Composition Protocol](extensions.md) defines
+this construction lifecycle, configuration boundary, cancellation path, and
+deliberately narrow tool projection. It does not add a J-specific wire
+protocol: J-mcp speaks MCP directly. It also does not use Go runtime plugins,
+auto-discovery, runtime tool mutation, or generic configuration payloads.
+
+If another meaningfully different tool-producing module validates the same
+lifecycle, the private host may be extracted. Until then, `Extension`,
+`Plugin`, and `MCP` remain absent from J-agent.
+
+## 9. Planned external modules
 
 These names describe product modules, not promised J-agent interfaces:
 
 | Module | Initial composition strategy |
 | --- | --- |
 | J-agent-swarm | Child J-agent instances exposed to the parent as delegation tools |
-| J-mcp | Map discovered MCP tools to `agent.Tool`; own connection/auth lifecycle |
+| J-mcp | J-tui construction-time module; map configured MCP tools to `agent.Tool`; own connection/auth lifecycle |
 | J-skills | Parse skill resources into prompt/tool recipes outside the runtime |
 | J-plugins | Own discovery, trust, installation, and composition |
 | J-gateway | Map platform chat identity to external Agent/session ownership |
 
 Go's runtime plugin ABI should not be assumed to provide Pi-style TypeScript
-extension loading. J-plugins must first validate whether compile-time Go
-composition, external processes, or resource-only packages solve the real use
-case.
+extension loading. J-plugins must first validate whether typed construction-time
+Go composition, external processes, or resource-only packages solve the real
+use case.
 
-## 9. Deliberately not generalized
+## 10. Deliberately not generalized
 
 Do not add these to J-agent without a failing real integration:
 
@@ -327,7 +347,7 @@ Potential future mechanisms must be validated in this order:
 5. Stabilize only after another independent consumer validates the same
    semantics.
 
-## 10. Decisions retained
+## 11. Decisions retained
 
 - J is the Git and GitHub repository root.
 - J uses Go 1.26 across its modules and workspace. CI follows the latest
@@ -348,14 +368,19 @@ Potential future mechanisms must be validated in this order:
 - Reference commands compose the first-party Bash Tool; the container, not the
   agent loop, owns execution isolation.
 - Public APIs remain experimental before independent production consumers.
+- Extension hosting remains product-owned construction-time composition;
+  J-agent does not discover or load extensions.
 
-## 11. Minimal development order
+## 12. Minimal development order
 
 1. Keep J-agent passing its protocol and race tests.
 2. Keep the text-only J-tui and JSON event trace passing against current events.
-3. Build J-mem SQLite transcript round-trip using `History` and `WithHistory`.
-4. Add the four JSONL-backed long-term memory tools.
-5. Re-audit actual integration friction before changing J-agent.
-6. Prototype J-mcp and subagent-as-tool.
-7. Design skill/plugin distribution only after at least two resource types
+3. Implement the private J-tui extension host and J-mcp against
+   `docs/extensions.md`.
+4. Validate one real MCP tool through J-tui without a J-agent API change.
+5. Build J-mem SQLite transcript round-trip using `History` and `WithHistory`.
+6. Add the four JSONL-backed long-term memory tools.
+7. Re-audit actual integration friction before changing J-agent.
+8. Prototype subagent-as-tool.
+9. Design skill/plugin distribution only after at least two resource types
    need common discovery and trust semantics.
