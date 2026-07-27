@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -37,6 +39,7 @@ type config struct {
 	reasoningField  string
 	reasoningEffort string
 	session         string
+	noSession       bool
 	extensions      *settings.Extensions
 	memory          *settings.Memory
 	prompts         []string
@@ -76,6 +79,9 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 			runErr = errors.Join(runErr, composition.Close())
 		}()
 		return writeMCPToolList(out, composition.mcpTools)
+	}
+	if err := ensureSession(&cfg); err != nil {
+		return err
 	}
 	model, err := buildModel(cfg)
 	if err != nil {
@@ -117,7 +123,7 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 			initialPrompt = cfg.prompts[0]
 		}
 		program := tea.NewProgram(
-			tui.New(ctx, runner, cfg.provider, cfg.model, initialPrompt),
+			tui.New(ctx, runner, cfg.provider, cfg.model, initialPrompt, cfg.session),
 			tea.WithContext(ctx),
 		)
 		_, err := program.Run()
@@ -175,6 +181,12 @@ func parseConfig(args []string) (config, error) {
 		"",
 		"transcript session to restore and persist",
 	)
+	flags.BoolVar(
+		&values.noSession,
+		"no-session",
+		false,
+		"disable transcript persistence for this invocation",
+	)
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -204,6 +216,9 @@ func parseConfig(args []string) (config, error) {
 		if visited["session"] {
 			return config{}, errors.New("--init-config does not accept --session")
 		}
+		if visited["no-session"] {
+			return config{}, errors.New("--init-config does not accept --no-session")
+		}
 		if values.listTools {
 			return config{}, errors.New("--init-config does not accept --list-tools")
 		}
@@ -217,6 +232,7 @@ func parseConfig(args []string) (config, error) {
 	cfg := config{
 		configPath:      configPath,
 		listTools:       values.listTools,
+		noSession:       values.noSession,
 		mode:            "tui",
 		provider:        "openai",
 		api:             string(openai.APICompletions),
@@ -276,6 +292,9 @@ func parseConfig(args []string) (config, error) {
 		}
 		if cfg.session != "" {
 			return config{}, errors.New("--list-tools does not accept --session")
+		}
+		if visited["no-session"] {
+			return config{}, errors.New("--list-tools does not accept --no-session")
 		}
 		if cfg.extensions == nil || cfg.extensions.MCP == nil {
 			return config{}, errors.New("--list-tools requires extensions.mcp in the configuration")
@@ -347,7 +366,24 @@ func parseConfig(args []string) (config, error) {
 			"--session requires memory.transcript in the selected configuration",
 		)
 	}
+	if cfg.noSession && cfg.session != "" {
+		return config{}, errors.New("--no-session cannot be combined with --session or J_TUI_SESSION")
+	}
 	return cfg, nil
+}
+
+func ensureSession(cfg *config) error {
+	if cfg == nil || cfg.noSession || cfg.session != "" ||
+		cfg.memory == nil || cfg.memory.Transcript == nil {
+		return nil
+	}
+	var entropy [6]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return fmt.Errorf("create transcript session ID: %w", err)
+	}
+	cfg.session = time.Now().UTC().Format("20060102T150405.000000000Z") +
+		"-" + hex.EncodeToString(entropy[:])
+	return nil
 }
 
 func writeMCPToolList(out io.Writer, observations []mcpToolObservation) error {

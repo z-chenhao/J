@@ -151,6 +151,11 @@ Add these top-level fields alongside `profiles`:
           "command": "github-mcp-server",
           "args": ["stdio"],
           "env": ["GITHUB_TOKEN"]
+        },
+        "tavily": {
+          "url": "https://mcp.tavily.com/mcp/",
+          "bearerTokenEnv": "TAVILY_API_KEY",
+          "tools": ["tavily_search"]
         }
       }
     }
@@ -166,11 +171,20 @@ Add these top-level fields alongside `profiles`:
 }
 ```
 
-`extensions.mcp` accepts explicit stdio servers. `command` is required;
-`args`, `env`, `cwd`, and `tools` are optional. `env` contains
-environment-variable names rather than values. J-tui supplies `PATH`, `HOME`,
-and available operational locale/temp variables, then forwards only the
-additionally named variables. A named variable that is not set fails startup.
+Each `extensions.mcp` server configures exactly one transport:
+
+- a stdio process uses `command` and optional `args`, `env`, and `cwd`;
+- a Streamable HTTP endpoint uses `url` and optional `bearerTokenEnv`.
+
+`env` and `bearerTokenEnv` contain environment-variable names rather than
+values. J-tui supplies stdio servers with `PATH`, `HOME`, and available
+operational locale/temp variables, then forwards only the additionally named
+variables. For HTTP, J-tui sends the named value as a Bearer token. A named
+variable that is not set fails startup. Do not put API keys in an HTTP URL.
+
+Direct Streamable HTTP avoids a Node/npm proxy process for a remote MCP server.
+For example, the Tavily configuration above replaces an `npx -y mcp-remote …`
+recipe while preserving the same MCP and J-agent Tool boundaries.
 
 Omitting `tools` selects every tool advertised by that server. A non-empty
 `tools` array is an exact, case-sensitive allowlist. Startup fails when a named
@@ -191,22 +205,31 @@ configuration file. With the default `~/.j/config.json`, the example memory
 files are therefore `~/.j/state/transcripts.db` and
 `~/.j/state/memory.jsonl`.
 
-Select a transcript explicitly:
+When `memory.transcript` is configured, every normal invocation creates a new
+session ID, writes an empty SQLite snapshot immediately, displays the ID in the
+TUI header, and persists the complete transcript after each successful run.
+This matches Pi's default of a new persisted session rather than silently
+resuming an older conversation.
+
+Restore and continue one exact session explicitly:
 
 ```bash
 j-tui --session project-j
 ```
 
-An existing session is restored before Agent construction; a missing session
-starts empty. Each successful run atomically replaces that session's SQLite
-snapshot. `J_TUI_SESSION` provides the environment equivalent. Without
-`--session`, the transcript store is not opened. Supplying a session without
-`memory.transcript` is rejected.
+An existing session is restored before Agent construction; a missing named
+session is created empty. `J_TUI_SESSION` provides the environment equivalent.
+Use `--no-session` for one intentionally ephemeral invocation even when
+transcript memory is configured. Supplying a session without
+`memory.transcript`, or combining `--session` with `--no-session`, is rejected.
 
 Long-term memory is independent of transcript sessions. When configured, it
 adds `memory_retrieve`, `memory_store`, `memory_modify`, and `memory_forget` as
 ordinary model-visible Tools backed by inspectable JSONL. Retrieval remains an
-explicit Tool call; J-tui does not inject memory into prompts.
+explicit Tool call; J-tui does not inject memory into prompts. Phrase and term
+matches rank first, then recent active records fill the bounded result so the
+Agent model can perform semantic relevance selection. Returned records are
+candidates, not a claim that every record matches.
 
 All configured MCP servers initialize before the Agent starts, and the selected
 Tools remain frozen for that process. A startup failure or a selected-name

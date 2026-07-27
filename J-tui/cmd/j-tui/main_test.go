@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/z-chenhao/J/J-agent/agent"
+	"github.com/z-chenhao/J/J-tui/internal/settings"
 )
 
 func TestParseConfigJSON(t *testing.T) {
@@ -259,6 +260,51 @@ func TestParseConfigRejectsSessionWithoutTranscriptMemory(t *testing.T) {
 	}
 }
 
+func TestEnsureSessionCreatesDefaultOnlyForConfiguredTranscript(t *testing.T) {
+	cfg := config{
+		memory: &settings.Memory{
+			Transcript: &settings.MemoryFile{Path: "state/transcripts.db"},
+		},
+	}
+	if err := ensureSession(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.session == "" {
+		t.Fatal("default session was not created")
+	}
+	first := cfg.session
+	if err := ensureSession(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.session != first {
+		t.Fatalf("existing session changed from %q to %q", first, cfg.session)
+	}
+
+	ephemeral := config{memory: cfg.memory, noSession: true}
+	if err := ensureSession(&ephemeral); err != nil {
+		t.Fatal(err)
+	}
+	if ephemeral.session != "" {
+		t.Fatalf("--no-session created %q", ephemeral.session)
+	}
+}
+
+func TestParseConfigRejectsNoSessionWithExplicitSession(t *testing.T) {
+	home := isolateConfig(t)
+	path := filepath.Join(home, ".j", "config.json")
+	writeConfig(t, path, `{
+		"defaultProfile":"local",
+		"profiles":{
+			"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}
+		},
+		"memory":{"transcript":{"path":"state/transcripts.db"}}
+	}`)
+	_, err := parseConfig([]string{"--no-session", "--session", "existing"})
+	if err == nil || !strings.Contains(err.Error(), "--no-session") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestParseConfigRequiresExplicitConfigToExist(t *testing.T) {
 	isolateConfig(t)
 	_, err := parseConfig([]string{
@@ -372,9 +418,10 @@ func TestParseConfigRejectsListToolsWithConversationArguments(t *testing.T) {
 		}
 	}`)
 	for name, args := range map[string][]string{
-		"prompt":  {"--list-tools", "hello"},
-		"mode":    {"--list-tools", "--mode", "json"},
-		"session": {"--list-tools", "--session", "project-j"},
+		"prompt":     {"--list-tools", "hello"},
+		"mode":       {"--list-tools", "--mode", "json"},
+		"session":    {"--list-tools", "--session", "project-j"},
+		"no-session": {"--list-tools", "--no-session"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := parseConfig(args); err == nil {

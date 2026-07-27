@@ -95,8 +95,8 @@ github.com/z-chenhao/J/J-agent v0.0.0-20260727045356-5813cc6f3af4 h1:lI4yUQ9lWHf
 github.com/z-chenhao/J/J-agent v0.0.0-20260727045356-5813cc6f3af4/go.mod h1:NwQs8C/lh8GHr3TMoLDFtSZg3LIUdZm2c4L3Hb2AO/g=
 github.com/z-chenhao/J/J-mcp v0.0.1 h1:05apgDNfaKaCrjR6u+hH7JwTG5kMVryUh04ME2IJfRE=
 github.com/z-chenhao/J/J-mcp v0.0.1/go.mod h1:UMGcAou0hWJzg5+fmNPgh+ZshLygurStpFaGDj8Kg/M=
-github.com/z-chenhao/J/J-mem v0.0.1 h1:HDEcVxgIpORUL2Izwnd2N43BAAyhKEU4EvOaNAQ7feM=
-github.com/z-chenhao/J/J-mem v0.0.1/go.mod h1:ym75O1fvpPzksETPboTIbmPAAk/3i1ng+fT6t5CZpFU=
+github.com/z-chenhao/J/J-mem v0.0.2 h1:wLKfZ1IeYr0RRXu8obLuc/roa8guwNhGcXVtIB1gz3g=
+github.com/z-chenhao/J/J-mem v0.0.2/go.mod h1:ym75O1fvpPzksETPboTIbmPAAk/3i1ng+fT6t5CZpFU=
 golang.org/x/exp v0.0.0-20231006140011-7918f672742d h1:jtJma62tbqLibJ5sFQz8bKtEM8rJBtfilJ2qTU199MI=
 golang.org/x/exp v0.0.0-20231006140011-7918f672742d/go.mod h1:ldy0pHrwJyGW56pPQzzkH36rKxoZW1tw7ZJpeKx+hdo=
 golang.org/x/mod v0.37.0 h1:vF1DjpVEshcIqoEaauuHebaLk1O1forxjxBaVn884JQ=

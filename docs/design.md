@@ -250,6 +250,23 @@ Project-local configuration merging, runtime profile mutation, credential
 storage, provider discovery, and a general settings framework remain
 deliberately absent.
 
+When transcript persistence is configured, J-tui creates a fresh named session
+for each normal invocation and immediately records its empty snapshot. Exact
+restoration remains explicit through `--session`; `--no-session` selects an
+ephemeral invocation. Pi's default new persisted session is the validated
+product precedent, but J deliberately does not copy Pi's branching JSONL tree,
+compaction, automatic continuation selector, or session manager into J-agent.
+Session identity and the SQLite snapshot recipe remain J-tui/J-mem policy over
+`History` and `WithHistory`.
+
+The Tavily integration also proved a second MCP transport recipe. Launching the
+remote server through `npx mcp-remote` made package startup dominate J-tui
+launch, while the remote endpoint itself spoke Streamable HTTP. J-tui now
+constructs the official SDK transport directly and supports one optional Bearer
+token environment variable. Arbitrary headers, OAuth policy, cached tool
+schemas, background daemons, and a J-specific transport interface remain
+unjustified.
+
 The first implementation uses existing start/delta/completed events. Its
 private reducer maps them to `thinking`, `responding`, `tool`, `completed`,
 `failed`, and `canceled` display states. J-tui displays reasoning content by
@@ -305,15 +322,37 @@ versioned SQLite schema. Loaded values are intended for `WithHistory`, where
 J-agent revalidates transcript invariants.
 
 The implemented long-term store is an inspectable append-only JSONL event log.
-`store`, `modify`, and `forget` operations append events; retrieval
-materializes active records and applies the initial deterministic
-case-insensitive substring policy. Its four model capabilities are
+`store`, `modify`, and `forget` operations append events. Retrieval
+materializes active records, ranks phrase and term matches first, and fills the
+bounded result with recent records for model-side semantic relevance
+selection. Its four model capabilities are
 `memory_retrieve`, `memory_store`, `memory_modify`, and `memory_forget`.
 
 J-mem owns schema migration, file formats, retrieval ordering, retention,
-conflict handling, and memory policy. Cross-process writers, embeddings,
-compaction, and ambient injection remain absent. J-agent does not define a
-universal `Memory` or `Storage` interface.
+conflict handling, and memory policy. The bounded hybrid policy is experimental
+and was earned by a real false negative: `位置 城市 出发 所在地` did not
+lexically contain the stored fact `用户现在在杭州`. Returning recent candidates
+lets the already participating Agent model judge semantic relevance without a
+second provider call or opaque index.
+
+Current memory research separates small high-value in-context memory from
+larger archival semantic search. A-MEM and Zep show useful structured-note and
+temporal-graph policies for larger memory systems, while current trust research
+warns that semantic recall is also an admission boundary rather than a
+similarity-only feature. J does not yet have the corpus, independent embedder,
+temporal facts, or measured failure modes that would justify those systems.
+
+Primary sources:
+
+- [Letta context hierarchy](https://docs.letta.com/guides/core-concepts/memory/context-hierarchy)
+- [A-MEM](https://arxiv.org/abs/2502.12110)
+- [Zep temporal knowledge graph](https://arxiv.org/abs/2501.13956)
+- [Beyond Similarity](https://arxiv.org/abs/2606.06054)
+
+Cross-process writers, embeddings, vector databases, graph synthesis,
+compaction, and ambient injection remain absent. The JSONL log remains
+authoritative and inspectable. J-agent does not define a universal `Memory` or
+`Storage` interface.
 
 Ambient retrieval or context injection should wait until the tool-based design
 proves insufficient. If required, a model wrapper should be tried before

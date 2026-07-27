@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,14 +45,17 @@ type MCP struct {
 	Servers map[string]MCPServer `json:"servers"`
 }
 
-// MCPServer describes one stdio MCP process. Env contains environment-variable
-// names, never values.
+// MCPServer describes either one stdio MCP process or one Streamable HTTP
+// endpoint. Env and BearerTokenEnv contain environment-variable names, never
+// values.
 type MCPServer struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args,omitempty"`
-	Env     []string `json:"env,omitempty"`
-	CWD     string   `json:"cwd,omitempty"`
-	Tools   []string `json:"tools,omitempty"`
+	Command        string   `json:"command,omitempty"`
+	Args           []string `json:"args,omitempty"`
+	Env            []string `json:"env,omitempty"`
+	CWD            string   `json:"cwd,omitempty"`
+	URL            string   `json:"url,omitempty"`
+	BearerTokenEnv string   `json:"bearerTokenEnv,omitempty"`
+	Tools          []string `json:"tools,omitempty"`
 }
 
 // Memory contains J-tui's two independently optional J-mem capabilities.
@@ -248,24 +252,54 @@ func (extensions *Extensions) validate() error {
 		if name == "" || name != strings.TrimSpace(name) {
 			return fmt.Errorf("MCP server name %q must be non-empty and trimmed", name)
 		}
-		if strings.TrimSpace(server.Command) == "" {
-			return fmt.Errorf("MCP server %q command is required", name)
-		}
 		if server.Command != strings.TrimSpace(server.Command) {
 			return fmt.Errorf("MCP server %q command must be trimmed", name)
+		}
+		if server.URL != strings.TrimSpace(server.URL) {
+			return fmt.Errorf("MCP server %q url must be trimmed", name)
+		}
+		hasCommand := server.Command != ""
+		hasURL := server.URL != ""
+		if hasCommand == hasURL {
+			return fmt.Errorf(
+				"MCP server %q must configure exactly one of command or url",
+				name,
+			)
 		}
 		if server.CWD != strings.TrimSpace(server.CWD) {
 			return fmt.Errorf("MCP server %q cwd must be trimmed", name)
 		}
+		if hasURL {
+			if len(server.Args) > 0 || len(server.Env) > 0 || server.CWD != "" {
+				return fmt.Errorf(
+					"MCP server %q url transport does not use args, env, or cwd",
+					name,
+				)
+			}
+			parsed, err := url.ParseRequestURI(server.URL)
+			if err != nil || parsed.Host == "" ||
+				(parsed.Scheme != "http" && parsed.Scheme != "https") ||
+				parsed.User != nil {
+				return fmt.Errorf(
+					"MCP server %q url must be an HTTP(S) URL without user information",
+					name,
+				)
+			}
+		} else if server.BearerTokenEnv != "" {
+			return fmt.Errorf(
+				"MCP server %q bearerTokenEnv requires url transport",
+				name,
+			)
+		}
+		if server.BearerTokenEnv != "" {
+			if err := validateEnvironmentName(server.BearerTokenEnv); err != nil {
+				return fmt.Errorf("MCP server %q bearerTokenEnv: %w", name, err)
+			}
+		}
 		seenEnvironment := make(map[string]struct{}, len(server.Env))
 		for _, variable := range server.Env {
-			if variable == "" || variable != strings.TrimSpace(variable) ||
-				strings.Contains(variable, "=") {
-				return fmt.Errorf(
-					"MCP server %q environment name %q must be non-empty, trimmed, and contain no '='",
-					name,
-					variable,
-				)
+			if err := validateEnvironmentName(variable); err != nil {
+				return fmt.Errorf("MCP server %q environment name %q: %w", name, variable, err)
 			}
 			if _, exists := seenEnvironment[variable]; exists {
 				return fmt.Errorf(
@@ -296,6 +330,13 @@ func (extensions *Extensions) validate() error {
 			}
 			seenTools[tool] = struct{}{}
 		}
+	}
+	return nil
+}
+
+func validateEnvironmentName(name string) error {
+	if name == "" || name != strings.TrimSpace(name) || strings.Contains(name, "=") {
+		return errors.New("must be non-empty, trimmed, and contain no '='")
 	}
 	return nil
 }

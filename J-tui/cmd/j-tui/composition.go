@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/z-chenhao/J/J-agent/agent"
 	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
 	jmcp "github.com/z-chenhao/J/J-mcp"
@@ -73,17 +75,7 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		serverNames := sortedServerNames(cfg.extensions.MCP.Servers)
 		for _, serverName := range serverNames {
 			server := cfg.extensions.MCP.Servers[serverName]
-			environment, err := mcpEnvironment(server.Env)
-			if err != nil {
-				return nil, fmt.Errorf("configure MCP server %q: %w", serverName, err)
-			}
-			connection, err := jmcp.DialStdio(ctx, jmcp.StdioConfig{
-				Command:         server.Command,
-				Args:            append([]string(nil), server.Args...),
-				Dir:             resolveOptionalPath(cfg.configPath, server.CWD),
-				Env:             environment,
-				ShutdownTimeout: mcpShutdownTimeout,
-			})
+			connection, err := connectMCPServer(ctx, cfg.configPath, server)
 			if err != nil {
 				return nil, fmt.Errorf("start MCP server %q: %w", serverName, err)
 			}
@@ -122,6 +114,9 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		case err == nil:
 			composition.history = history
 		case errors.Is(err, transcript.ErrNotFound):
+			if err := store.Save(ctx, cfg.session, nil); err != nil {
+				return nil, fmt.Errorf("create session %q: %w", cfg.session, err)
+			}
 		default:
 			return nil, fmt.Errorf("restore session %q: %w", cfg.session, err)
 		}
@@ -129,6 +124,58 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 
 	succeeded = true
 	return composition, nil
+}
+
+func connectMCPServer(
+	ctx context.Context,
+	configPath string,
+	server settings.MCPServer,
+) (*jmcp.Connection, error) {
+	if server.Command != "" {
+		environment, err := mcpEnvironment(server.Env)
+		if err != nil {
+			return nil, err
+		}
+		return jmcp.DialStdio(ctx, jmcp.StdioConfig{
+			Command:         server.Command,
+			Args:            append([]string(nil), server.Args...),
+			Dir:             resolveOptionalPath(configPath, server.CWD),
+			Env:             environment,
+			ShutdownTimeout: mcpShutdownTimeout,
+		})
+	}
+
+	var client *http.Client
+	if server.BearerTokenEnv != "" {
+		token, exists := os.LookupEnv(server.BearerTokenEnv)
+		if !exists || strings.TrimSpace(token) == "" {
+			return nil, fmt.Errorf(
+				"bearer token environment variable %s is not set",
+				server.BearerTokenEnv,
+			)
+		}
+		client = &http.Client{Transport: bearerTransport{
+			base:  http.DefaultTransport,
+			token: token,
+		}}
+	}
+	return jmcp.Connect(ctx, &mcpsdk.StreamableClientTransport{
+		Endpoint:             server.URL,
+		HTTPClient:           client,
+		MaxRetries:           -1,
+		DisableStandaloneSSE: true,
+	})
+}
+
+type bearerTransport struct {
+	base  http.RoundTripper
+	token string
+}
+
+func (transport bearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	copy := request.Clone(request.Context())
+	copy.Header.Set("Authorization", "Bearer "+transport.token)
+	return transport.base.RoundTrip(copy)
 }
 
 func selectMCPTools(

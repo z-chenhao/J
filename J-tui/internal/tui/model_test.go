@@ -14,7 +14,7 @@ import (
 )
 
 func TestApplyEventTracksStreamingReasoningAndTools(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 
 	model.applyEvent(agent.Event{Type: agent.EventAgentStarted})
 	model.applyEvent(agent.Event{Type: agent.EventTurnStarted})
@@ -81,7 +81,7 @@ func TestApplyEventTracksStreamingReasoningAndTools(t *testing.T) {
 }
 
 func TestFooterAggregatesCompleteRunUsage(t *testing.T) {
-	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "", "")
 	firstCached := int64(7)
 	secondCached := int64(12)
 	firstDelta := 5 * time.Millisecond
@@ -127,7 +127,7 @@ func TestFooterAggregatesCompleteRunUsage(t *testing.T) {
 }
 
 func TestFooterDoesNotPresentPartialCacheBreakdown(t *testing.T) {
-	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "", "")
 	cached := int64(7)
 	model.applyEvent(agent.Event{
 		Type: agent.EventTurnCompleted,
@@ -154,7 +154,7 @@ func TestFooterDoesNotPresentPartialCacheBreakdown(t *testing.T) {
 }
 
 func TestFooterDoesNotPresentPartialRunUsage(t *testing.T) {
-	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "", "")
 	model.applyEvent(agent.Event{
 		Type: agent.EventTurnCompleted,
 		Model: &agent.ModelObservation{Usage: &agent.Usage{
@@ -182,7 +182,7 @@ func int64Pointer(value int64) *int64 {
 }
 
 func TestApplyEventRemovesEmptyToolCallMessage(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.applyEvent(agent.Event{Type: agent.EventMessageStarted})
 	message := agent.Message{
 		Role: agent.RoleAssistant,
@@ -200,7 +200,7 @@ func TestApplyEventRemovesEmptyToolCallMessage(t *testing.T) {
 }
 
 func TestApplyEventRetainsCompletedReasoningWithoutDeltas(t *testing.T) {
-	model := New(context.Background(), nil, "openai", "non-streaming", "")
+	model := New(context.Background(), nil, "openai", "non-streaming", "", "")
 	model.applyEvent(agent.Event{Type: agent.EventMessageStarted})
 	message := agent.Message{
 		Role: agent.RoleAssistant,
@@ -218,7 +218,7 @@ func TestApplyEventRetainsCompletedReasoningWithoutDeltas(t *testing.T) {
 }
 
 func TestApplyEventShowsToolFailure(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	call := agent.ToolCall{ID: "call-1", Name: "probe"}
 	model.applyEvent(agent.Event{Type: agent.EventToolStarted, ToolCall: &call})
 	model.applyEvent(agent.Event{
@@ -234,7 +234,7 @@ func TestApplyEventShowsToolFailure(t *testing.T) {
 }
 
 func TestApplyEventShowsTerminalFailureOnce(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.applyEvent(agent.Event{Type: agent.EventAgentFailed, Error: "boom"})
 	model.applyEvent(agent.Event{Type: agent.EventAgentFailed, Error: "boom"})
 	if len(model.items) != 1 {
@@ -243,7 +243,7 @@ func TestApplyEventShowsTerminalFailureOnce(t *testing.T) {
 }
 
 func TestRunDoneClassifiesCancellation(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.running = true
 	model.events = make(chan tea.Msg)
 	updated, _ := model.Update(runDoneMsg{err: context.Canceled})
@@ -254,7 +254,7 @@ func TestRunDoneClassifiesCancellation(t *testing.T) {
 }
 
 func TestCancellationDoesNotRenderProviderFailure(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.status = "canceling"
 	model.applyEvent(agent.Event{
 		Type:  agent.EventAgentFailed,
@@ -266,7 +266,7 @@ func TestCancellationDoesNotRenderProviderFailure(t *testing.T) {
 }
 
 func TestViewIncludesModelAndControls(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "session-123")
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	rendered := updated.(Model).View()
 	if rendered.MouseMode != tea.MouseModeNone {
@@ -275,6 +275,7 @@ func TestViewIncludesModelAndControls(t *testing.T) {
 	view := rendered.Content
 	for _, text := range []string{
 		"ollama/qwen",
+		"session session-123",
 		"enter send",
 		"alt+↑/↓ scroll",
 		"ctrl+t thinking",
@@ -296,7 +297,7 @@ func TestViewFitsTerminal(t *testing.T) {
 		{Width: 80, Height: 24},
 		{Width: 120, Height: 36},
 	} {
-		model := New(context.Background(), nil, "deepseek", "deepseek-v4-flash", "")
+		model := New(context.Background(), nil, "deepseek", "deepseek-v4-flash", "", "")
 		model.items = append(model.items,
 			transcriptItem{kind: itemUser, text: "render this message"},
 			transcriptItem{
@@ -333,7 +334,7 @@ func TestViewFitsTerminal(t *testing.T) {
 }
 
 func TestBackgroundColorSelectsStylesWithoutRendererProbe(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.items = append(model.items, transcriptItem{
 		kind:           itemAssistant,
 		text:           "cached",
@@ -362,7 +363,7 @@ func TestBackgroundColorSelectsStylesWithoutRendererProbe(t *testing.T) {
 }
 
 func TestReasoningIsVisibleByDefaultAndCtrlTTogglesIt(t *testing.T) {
-	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "")
+	model := New(context.Background(), nil, "deepseek", "deepseek-chat", "", "")
 	model.items = append(model.items, transcriptItem{
 		kind:      itemAssistant,
 		reasoning: "First inspect the available evidence.",
@@ -397,7 +398,7 @@ func TestReasoningIsVisibleByDefaultAndCtrlTTogglesIt(t *testing.T) {
 }
 
 func TestInputHeightGrowsWithContent(t *testing.T) {
-	model := New(context.Background(), nil, "deepseek", "deepseek-v4-flash", "")
+	model := New(context.Background(), nil, "deepseek", "deepseek-v4-flash", "", "")
 	if model.input.Height() != 1 {
 		t.Fatalf("empty input height = %d", model.input.Height())
 	}
@@ -422,7 +423,7 @@ func TestInputHeightGrowsWithContent(t *testing.T) {
 }
 
 func TestMarkdownAndToolRendering(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	rendered := model.renderMarkdown("**bold**\n\n```go\nfmt.Println(\"ok\")\n```", 60)
 	plain := ansi.Strip(rendered)
 	if !strings.Contains(plain, "bold") ||
@@ -470,7 +471,7 @@ func TestTerminalTextRemovesControlSequences(t *testing.T) {
 }
 
 func TestSyncViewportPreservesManualScroll(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.width = 80
 	model.height = 12
 	model.resize()
@@ -495,7 +496,7 @@ func TestSyncViewportPreservesManualScroll(t *testing.T) {
 }
 
 func TestTranscriptScrollKeysUseViewportKeyMap(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.viewport.SetHeight(4)
 	model.viewport.SetContent(strings.Repeat("line\n", 20))
 	model.viewport.GotoBottom()
@@ -521,7 +522,7 @@ func TestTranscriptScrollKeysUseViewportKeyMap(t *testing.T) {
 }
 
 func TestEditorRetainsCtrlUDeleteBinding(t *testing.T) {
-	model := New(context.Background(), nil, "ollama", "qwen", "")
+	model := New(context.Background(), nil, "ollama", "qwen", "", "")
 	model.input.SetValue("draft")
 
 	updated, _ := model.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})

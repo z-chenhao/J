@@ -86,6 +86,33 @@ func TestLoadTypedMCPAndMemoryConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadStreamableHTTPMCPConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, path, `{
+		"defaultProfile":"local",
+		"profiles":{
+			"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}
+		},
+		"extensions":{"mcp":{"servers":{
+			"search":{
+				"url":"https://mcp.example.test/mcp/",
+				"bearerTokenEnv":"SEARCH_MCP_TOKEN",
+				"tools":["search"]
+			}
+		}}}
+	}`)
+	file, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := file.Extensions.MCP.Servers["search"]
+	if server.URL != "https://mcp.example.test/mcp/" ||
+		server.BearerTokenEnv != "SEARCH_MCP_TOKEN" ||
+		len(server.Tools) != 1 {
+		t.Fatalf("server=%#v", server)
+	}
+}
+
 func TestLoadRejectsUnknownAndTrailingData(t *testing.T) {
 	for name, contents := range map[string]string{
 		"unknown":  `{"defaultProfile":"x","profiles":{},"extra":true}`,
@@ -145,6 +172,31 @@ func TestLoadRejectsInvalidMCPAndMemoryConfiguration(t *testing.T) {
 			"defaultProfile":"local",
 			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
 			"extensions":{"mcp":{"servers":{"x":{"command":"server","tools":["read_file","read_file"]}}}}
+		}`,
+		"missing MCP transport": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{}}}}
+		}`,
+		"multiple MCP transports": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"command":"server","url":"https://mcp.example/mcp"}}}}
+		}`,
+		"stdio bearer token": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"command":"server","bearerTokenEnv":"TOKEN"}}}}
+		}`,
+		"HTTP process settings": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"url":"https://mcp.example/mcp","args":["bad"]}}}}
+		}`,
+		"invalid HTTP URL": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"url":"file:///tmp/mcp"}}}}
 		}`,
 		"empty memory": `{
 			"defaultProfile":"local",

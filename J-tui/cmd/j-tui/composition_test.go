@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -182,6 +184,83 @@ func TestComposeRuntimeRejectsUnknownConfiguredMCPTool(t *testing.T) {
 	}
 }
 
+func TestComposeRuntimeLoadsStreamableHTTPMCPWithBearerToken(t *testing.T) {
+	t.Setenv("REMOTE_MCP_TOKEN", "test-token")
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{
+		Name:    "j-tui-http-mcp-test",
+		Version: "0.1.0",
+	}, nil)
+	server.AddTool(&mcpsdk.Tool{
+		Name:        "remote_probe",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}, func(context.Context, *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+		return &mcpsdk.CallToolResult{
+			Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "remote-result"}},
+		}, nil
+	})
+	mcpHandler := mcpsdk.NewStreamableHTTPHandler(
+		func(*http.Request) *mcpsdk.Server { return server },
+		&mcpsdk.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+	)
+	httpServer := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			if request.Header.Get("Authorization") != "Bearer test-token" {
+				http.Error(writer, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			mcpHandler.ServeHTTP(writer, request)
+		},
+	))
+	defer httpServer.Close()
+
+	composition, err := composeRuntime(context.Background(), config{
+		configPath: filepath.Join(t.TempDir(), "config.json"),
+		extensions: &settings.Extensions{MCP: &settings.MCP{
+			Servers: map[string]settings.MCPServer{
+				"remote": {
+					URL:            httpServer.URL,
+					BearerTokenEnv: "REMOTE_MCP_TOKEN",
+					Tools:          []string{"remote_probe"},
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer composition.Close()
+
+	var probe agent.Tool
+	for _, tool := range composition.tools {
+		if tool.Spec().Name == "remote_probe" {
+			probe = tool
+		}
+	}
+	if probe == nil {
+		t.Fatal("Streamable HTTP MCP tool was not composed")
+	}
+	output, err := probe.Call(context.Background(), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "remote-result" {
+		t.Fatalf("output=%q", output)
+	}
+}
+
+func TestComposeRuntimeRequiresConfiguredHTTPBearerToken(t *testing.T) {
+	if err := os.Unsetenv("MISSING_REMOTE_MCP_TOKEN"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := connectMCPServer(context.Background(), "", settings.MCPServer{
+		URL:            "https://mcp.example.test/mcp",
+		BearerTokenEnv: "MISSING_REMOTE_MCP_TOKEN",
+	})
+	if err == nil || !strings.Contains(err.Error(), "MISSING_REMOTE_MCP_TOKEN") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestPersistentRunnerSavesAndRestoresTranscript(t *testing.T) {
 	configPath := filepath.Join(t.TempDir(), ".j", "config.json")
 	cfg := config{
@@ -231,6 +310,31 @@ func TestPersistentRunnerSavesAndRestoresTranscript(t *testing.T) {
 		agent.WithHistory(restored.history...),
 	); err != nil {
 		t.Fatalf("restored Agent failed: %v", err)
+	}
+}
+
+func TestComposeRuntimeCreatesEmptyTranscriptSessionImmediately(t *testing.T) {
+	cfg := config{
+		configPath: filepath.Join(t.TempDir(), ".j", "config.json"),
+		memory: &settings.Memory{
+			Transcript: &settings.MemoryFile{Path: "state/transcripts.db"},
+		},
+	}
+	if err := ensureSession(&cfg); err != nil {
+		t.Fatal(err)
+	}
+	composition, err := composeRuntime(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer composition.Close()
+
+	history, err := composition.transcripts.Load(context.Background(), cfg.session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("new session history=%#v", history)
 	}
 }
 

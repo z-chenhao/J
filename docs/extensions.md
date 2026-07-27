@@ -103,7 +103,8 @@ J-mcp owns:
 J-mcp's `DialStdio` is the initial process recipe. Its experimental `Connect`
 accepts the official Go SDK's `mcp.Transport`, so applications with another
 standard transport can compose it without J defining a duplicate Transport
-interface. J-tui's first configuration remains stdio-only.
+interface. J-tui uses that seam for both stdio and Streamable HTTP while keeping
+transport configuration in the product host.
 
 ## Composition lifecycle
 
@@ -145,7 +146,8 @@ J-tui remains the owner of `~/.j/config.json`. Presence of the typed `mcp`
 extension enables it; absence disables it. There is no redundant `enabled`
 flag.
 
-The first implementation accepts only explicit stdio servers:
+The implementation accepts explicit stdio servers and Streamable HTTP
+endpoints:
 
 ```json
 {
@@ -165,6 +167,10 @@ The first implementation accepts only explicit stdio servers:
           "args": ["/workspace"],
           "env": ["FILESYSTEM_TOKEN"],
           "cwd": "servers/filesystem"
+        },
+        "search": {
+          "url": "https://mcp.example.test/mcp/",
+          "bearerTokenEnv": "SEARCH_MCP_TOKEN"
         }
       }
     }
@@ -174,8 +180,12 @@ The first implementation accepts only explicit stdio servers:
 
 Rules:
 
-- `command` is required; `args`, `env`, `cwd`, and `tools` are optional.
-- `env` contains environment-variable names, never secret values.
+- exactly one of `command` or `url` is required.
+- stdio accepts optional `args`, `env`, and `cwd`; HTTP does not.
+- HTTP accepts optional `bearerTokenEnv` and sends that value through the
+  standard Authorization Bearer header.
+- `env` and `bearerTokenEnv` contain environment-variable names, never secret
+  values.
 - omitted `tools` selects every advertised tool; a non-empty array is an exact,
   case-sensitive allowlist.
 - an empty allowlist or a name not advertised by that server fails explicitly.
@@ -185,8 +195,9 @@ Rules:
 - unknown extension kinds and fields are rejected.
 - a configured server that cannot initialize fails startup explicitly.
 - no project-local auto-discovery or implicit command execution occurs.
-- J-tui Streamable HTTP configuration waits for a real integration that needs
-  it; independent Go consumers may supply an official SDK transport directly.
+- the Tavily remote MCP integration is the concrete consumer that justifies
+  Streamable HTTP; arbitrary headers, OAuth policy, and transport tuning remain
+  absent.
 
 The schema is executable. J-tui sorts server IDs for deterministic startup,
 discovers each server's complete tool set through J-mcp, applies its private
@@ -237,7 +248,8 @@ Retries and reconnects are policies that require operational evidence.
 ## Security boundary
 
 An explicitly configured stdio MCP server is executable code with the
-permissions of J-tui. It is not a sandbox.
+permissions of J-tui. An HTTP MCP server is a remote capability and data
+boundary. Neither transport is a sandbox.
 
 Version 0.1 therefore:
 
@@ -326,11 +338,13 @@ J-tui integration additionally proves:
 
 1. a configured stdio server's Tool is callable through J-tui's composed
    runner;
-2. duplicate names across built-in, memory, and MCP tools fail before Agent
+2. a configured Streamable HTTP server receives Bearer authentication and its
+   Tool is callable through the same composition;
+3. duplicate names across built-in, memory, and MCP tools fail before Agent
    construction;
-3. omitted MCP configuration starts no process and exposes no MCP tools;
-4. only named environment values are forwarded beyond the documented baseline;
-5. transcript snapshots restore through `WithHistory`, and successful runs
+4. omitted MCP configuration starts no process and exposes no MCP tools;
+5. only named environment values are forwarded beyond the documented baseline;
+6. transcript snapshots restore through `WithHistory`, and successful runs
    persist the next complete snapshot.
 
 A provider-backed live MCP call remains an operational smoke test rather than

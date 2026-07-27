@@ -70,6 +70,7 @@ type Model struct {
 	runner   runner
 	provider string
 	model    string
+	session  string
 
 	input    textarea.Model
 	viewport viewport.Model
@@ -95,7 +96,11 @@ type Model struct {
 }
 
 // New constructs a TUI that renders one runner conversation.
-func New(ctx context.Context, runner runner, provider, model, initialPrompt string) Model {
+func New(
+	ctx context.Context,
+	runner runner,
+	provider, model, initialPrompt, session string,
+) Model {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -145,6 +150,7 @@ func New(ctx context.Context, runner runner, provider, model, initialPrompt stri
 		isDark:           defaultDarkBackground,
 		styles:           styleSet,
 	}
+	result.session = session
 	result.resize()
 	result.syncViewport()
 	return result

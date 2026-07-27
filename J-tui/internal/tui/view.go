@@ -65,8 +65,12 @@ func newStyles(isDark bool) styles {
 
 // View renders a compact transcript, editor, and runtime footer.
 func (m Model) View() tea.View {
-	header := m.styles.accent.Render("J") + "  " +
-		m.styles.muted.Render(safeTerminalText(m.provider+"/"+m.model))
+	identity := m.provider + "/" + m.model
+	if m.session != "" {
+		identity += "  ·  session " + m.session
+	}
+	identity = compact(safeTerminalText(identity), max(m.width-7, 20))
+	header := m.styles.accent.Render("J") + "  " + m.styles.muted.Render(identity)
 
 	status := m.footer()
 	if m.running {
