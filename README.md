@@ -51,8 +51,11 @@ docker run --rm -i \
   -e DEEPSEEK_API_KEY \
   -v "$PWD:/workspace" \
   j:dev \
-  --provider deepseek \
+  --provider openai \
   --model deepseek-v4-flash \
+  --base-url https://api.deepseek.com \
+  --api-key-env DEEPSEEK_API_KEY \
+  --reasoning-field reasoning_content \
   "Use bash to print the working directory."
 ```
 
@@ -64,8 +67,11 @@ docker run --rm -it \
   -v "$PWD:/workspace" \
   --entrypoint j-tui \
   j:dev \
-  --provider deepseek \
-  --model deepseek-v4-flash
+  --provider openai \
+  --model deepseek-v4-flash \
+  --base-url https://api.deepseek.com \
+  --api-key-env DEEPSEEK_API_KEY \
+  --reasoning-field reasoning_content
 ```
 
 The mounted `/workspace`, environment variables, network, resource limits, and

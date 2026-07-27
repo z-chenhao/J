@@ -14,9 +14,8 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/z-chenhao/J/J-agent/adapter/deepseek"
-	"github.com/z-chenhao/J/J-agent/adapter/ollama"
 	"github.com/z-chenhao/J/J-agent/agent"
+	"github.com/z-chenhao/J/J-agent/provider/openai"
 	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
 	"github.com/z-chenhao/J/J-tui/internal/tui"
 )
@@ -26,7 +25,8 @@ type config struct {
 	provider        string
 	model           string
 	baseURL         string
-	thinking        string
+	apiKeyEnv       string
+	reasoningField  string
 	reasoningEffort string
 	prompts         []string
 }
@@ -85,15 +85,26 @@ func parseConfig(args []string) (config, error) {
 	flags.SetOutput(os.Stderr)
 	var cfg config
 	flags.StringVar(&cfg.mode, "mode", "tui", "output mode: tui or json")
-	flags.StringVar(&cfg.provider, "provider", env("J_TUI_PROVIDER"), "model provider: deepseek or ollama")
+	flags.StringVar(&cfg.provider, "provider", env("J_TUI_PROVIDER"), "model provider: openai")
 	flags.StringVar(&cfg.model, "model", env("J_TUI_MODEL"), "provider model name")
 	flags.StringVar(&cfg.baseURL, "base-url", env("J_TUI_BASE_URL"), "provider API base URL")
-	flags.StringVar(&cfg.thinking, "thinking", env("J_TUI_THINKING"), "thinking mode: default, enabled, or disabled")
+	flags.StringVar(
+		&cfg.apiKeyEnv,
+		"api-key-env",
+		env("J_TUI_API_KEY_ENV"),
+		"environment variable containing the provider API key",
+	)
+	flags.StringVar(
+		&cfg.reasoningField,
+		"reasoning-field",
+		env("J_TUI_REASONING_FIELD"),
+		"assistant reasoning history field: omit, reasoning_content, or reasoning",
+	)
 	flags.StringVar(
 		&cfg.reasoningEffort,
 		"reasoning-effort",
 		env("J_TUI_REASONING_EFFORT"),
-		"DeepSeek reasoning effort: default, high, or max",
+		"OpenAI-compatible reasoning effort: default, none, low, medium, high, or max",
 	)
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
@@ -102,13 +113,17 @@ func parseConfig(args []string) (config, error) {
 	cfg.provider = strings.ToLower(strings.TrimSpace(cfg.provider))
 	cfg.model = strings.TrimSpace(cfg.model)
 	cfg.baseURL = strings.TrimSpace(cfg.baseURL)
-	cfg.thinking = strings.ToLower(strings.TrimSpace(cfg.thinking))
+	cfg.apiKeyEnv = strings.TrimSpace(cfg.apiKeyEnv)
+	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
 	if cfg.provider == "" {
-		cfg.provider = "ollama"
+		cfg.provider = "openai"
 	}
-	if cfg.thinking == "" {
-		cfg.thinking = "default"
+	if cfg.apiKeyEnv == "" {
+		cfg.apiKeyEnv = "OPENAI_API_KEY"
+	}
+	if cfg.reasoningField == "" {
+		cfg.reasoningField = "omit"
 	}
 	if cfg.reasoningEffort == "" {
 		cfg.reasoningEffort = "default"
@@ -118,71 +133,56 @@ func parseConfig(args []string) (config, error) {
 	if cfg.model == "" {
 		return config{}, errors.New("--model or J_TUI_MODEL is required")
 	}
+	if cfg.baseURL == "" {
+		return config{}, errors.New("--base-url or J_TUI_BASE_URL is required")
+	}
 	if cfg.mode != "tui" && cfg.mode != "json" {
 		return config{}, fmt.Errorf("unsupported mode %q", cfg.mode)
 	}
 	if cfg.mode == "json" && len(cfg.prompts) == 0 {
 		return config{}, errors.New("json mode requires at least one prompt")
 	}
-	switch cfg.thinking {
-	case "default", "enabled", "disabled":
-	default:
-		return config{}, fmt.Errorf("unsupported thinking mode %q", cfg.thinking)
-	}
-	switch cfg.reasoningEffort {
-	case "default", "high", "max":
-	default:
-		return config{}, fmt.Errorf("unsupported reasoning effort %q", cfg.reasoningEffort)
-	}
-	if cfg.provider != "deepseek" && cfg.provider != "ollama" {
+	if cfg.provider != "openai" {
 		return config{}, fmt.Errorf("unsupported provider %q", cfg.provider)
 	}
-	if cfg.provider != "deepseek" && cfg.reasoningEffort != "default" {
-		return config{}, errors.New("--reasoning-effort is supported only by deepseek")
+	switch cfg.reasoningField {
+	case "omit", "reasoning_content", "reasoning":
+	default:
+		return config{}, fmt.Errorf("unsupported reasoning field %q", cfg.reasoningField)
+	}
+	switch cfg.reasoningEffort {
+	case "default", "none", "low", "medium", "high", "max":
+	default:
+		return config{}, fmt.Errorf("unsupported reasoning effort %q", cfg.reasoningEffort)
 	}
 	return cfg, nil
 }
 
 func buildModel(cfg config) (agent.Model, error) {
-	switch cfg.provider {
-	case "deepseek":
-		thinking := deepseek.ThinkingDefault
-		switch cfg.thinking {
-		case "enabled":
-			thinking = deepseek.ThinkingEnabled
-		case "disabled":
-			thinking = deepseek.ThinkingDisabled
-		}
-		reasoningEffort := deepseek.ReasoningDefault
-		switch cfg.reasoningEffort {
-		case "high":
-			reasoningEffort = deepseek.ReasoningHigh
-		case "max":
-			reasoningEffort = deepseek.ReasoningMax
-		}
-		return deepseek.New(deepseek.Config{
-			APIKey:          env("DEEPSEEK_API_KEY"),
-			Model:           cfg.model,
-			BaseURL:         cfg.baseURL,
-			Thinking:        thinking,
-			ReasoningEffort: reasoningEffort,
-		})
-	case "ollama":
-		thinking := ollama.ThinkingDefault
-		switch cfg.thinking {
-		case "enabled":
-			thinking = ollama.ThinkingEnabled
-		case "disabled":
-			thinking = ollama.ThinkingDisabled
-		}
-		return ollama.New(ollama.Config{
-			Model:    cfg.model,
-			BaseURL:  cfg.baseURL,
-			Thinking: thinking,
-		})
-	default:
+	if cfg.provider != "openai" {
 		return nil, fmt.Errorf("unsupported provider %q", cfg.provider)
 	}
+	return openai.New(openai.Config{
+		APIKey:          env(cfg.apiKeyEnv),
+		Model:           cfg.model,
+		BaseURL:         cfg.baseURL,
+		ReasoningField:  parseReasoningField(cfg.reasoningField),
+		ReasoningEffort: openai.ReasoningEffort(cfg.reasoningEffortValue()),
+	})
+}
+
+func (cfg config) reasoningEffortValue() string {
+	if cfg.reasoningEffort == "default" {
+		return ""
+	}
+	return cfg.reasoningEffort
+}
+
+func parseReasoningField(value string) openai.ReasoningField {
+	if value == "omit" {
+		return openai.ReasoningFieldOmit
+	}
+	return openai.ReasoningField(value)
 }
 
 func runJSON(ctx context.Context, runner *agent.Agent, prompts []string, out io.Writer) error {

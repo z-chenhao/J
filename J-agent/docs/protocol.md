@@ -150,7 +150,7 @@ delta type, so interleaved streams remain unambiguous.
 }
 ```
 
-`firstDeltaMs` is absent for a non-streaming custom adapter. Tool completion
+`firstDeltaMs` is absent for a non-streaming custom Model implementation. Tool completion
 events carry `durationMs`. Model duration is end-to-end wall time and therefore
 includes synchronous delta delivery to the run's event handler.
 

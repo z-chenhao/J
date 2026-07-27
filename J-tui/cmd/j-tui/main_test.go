@@ -14,45 +14,70 @@ import (
 
 func TestParseConfigJSON(t *testing.T) {
 	t.Setenv("J_TUI_MODEL", "")
+	t.Setenv("J_TUI_BASE_URL", "")
 	cfg, err := parseConfig([]string{
 		"--mode", "json",
-		"--provider", "ollama",
+		"--provider", "openai",
 		"--model", "qwen3.6:27b-q4_K_M",
-		"--thinking", "enabled",
+		"--base-url", "http://127.0.0.1:11434/v1",
+		"--reasoning-field", "reasoning",
 		"hello",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.mode != "json" || cfg.provider != "ollama" ||
+	if cfg.mode != "json" || cfg.provider != "openai" ||
 		cfg.model != "qwen3.6:27b-q4_K_M" ||
-		cfg.thinking != "enabled" || len(cfg.prompts) != 1 {
+		cfg.reasoningField != "reasoning" || len(cfg.prompts) != 1 {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }
 
-func TestParseConfigAcceptsDeepSeek(t *testing.T) {
+func TestParseConfigAcceptsDeepSeekThroughOpenAIProvider(t *testing.T) {
 	t.Setenv("J_TUI_MODEL", "")
+	t.Setenv("J_TUI_BASE_URL", "")
 	cfg, err := parseConfig([]string{
-		"--provider", "deepseek",
+		"--provider", "openai",
 		"--model", "deepseek-v4-flash",
-		"--thinking", "enabled",
+		"--base-url", "https://api.deepseek.com",
+		"--api-key-env", "DEEPSEEK_API_KEY",
+		"--reasoning-field", "reasoning_content",
 		"--reasoning-effort", "high",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.provider != "deepseek" || cfg.reasoningEffort != "high" {
+	if cfg.provider != "openai" || cfg.apiKeyEnv != "DEEPSEEK_API_KEY" ||
+		cfg.reasoningField != "reasoning_content" || cfg.reasoningEffort != "high" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }
 
-func TestParseConfigRejectsDeepSeekOptionsForOllama(t *testing.T) {
+func TestParseConfigAcceptsOMLXThroughOpenAIProvider(t *testing.T) {
 	t.Setenv("J_TUI_MODEL", "")
+	t.Setenv("J_TUI_BASE_URL", "")
+	cfg, err := parseConfig([]string{
+		"--provider", "openai",
+		"--model", "Qwen3.6-35B-A3B-oQ4e-mtp",
+		"--base-url", "http://127.0.0.1:8000/v1",
+		"--api-key-env", "OMLX_API_KEY",
+		"--reasoning-field", "reasoning_content",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.provider != "openai" || cfg.model != "Qwen3.6-35B-A3B-oQ4e-mtp" {
+		t.Fatalf("unexpected config: %#v", cfg)
+	}
+}
+
+func TestParseConfigRejectsFormerProviderNames(t *testing.T) {
+	t.Setenv("J_TUI_MODEL", "")
+	t.Setenv("J_TUI_BASE_URL", "")
 	_, err := parseConfig([]string{
 		"--provider", "ollama",
 		"--model", "qwen",
-		"--reasoning-effort", "high",
+		"--base-url", "http://127.0.0.1:11434/v1",
 	})
 	if err == nil {
 		t.Fatal("expected an error")
@@ -61,7 +86,12 @@ func TestParseConfigRejectsDeepSeekOptionsForOllama(t *testing.T) {
 
 func TestParseConfigRejectsMissingJSONPrompt(t *testing.T) {
 	t.Setenv("J_TUI_MODEL", "")
-	_, err := parseConfig([]string{"--mode", "json", "--model", "qwen"})
+	t.Setenv("J_TUI_BASE_URL", "")
+	_, err := parseConfig([]string{
+		"--mode", "json",
+		"--model", "qwen",
+		"--base-url", "http://127.0.0.1:11434/v1",
+	})
 	if err == nil {
 		t.Fatal("expected an error")
 	}

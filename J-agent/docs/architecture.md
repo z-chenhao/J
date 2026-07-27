@@ -18,9 +18,11 @@ Current in-repository consumers are:
 - the private JSONL queue used by the reference process
 - J-tui's interactive and JSON event modes
 
-The DeepSeek and Ollama adapters independently validate the model seam.
-Applications embedding the Go `agent` package are the intended external
-audience, but external production consumers have not yet been verified.
+The OpenAI-compatible provider is exercised against DeepSeek, Ollama, and
+oMLX. Those servers validate one protocol implementation; they do not count as
+independent implementations of the `Model` seam. Applications embedding the Go
+`agent` package are the intended external audience, but external production
+consumers have not yet been verified.
 
 The runtime must:
 
@@ -28,7 +30,7 @@ The runtime must:
 - preserve provider-required reasoning across tool continuations
 - give models the exact tool schemas they may use
 - return tool errors to the model
-- bound tool-call loops
+- keep tool-call continuation cancelable without imposing a runtime round cap
 - propagate cancellation
 - make task terminal states unambiguous
 - emit an ordered, writable event stream
@@ -67,8 +69,9 @@ read `History`, but must not reenter `Run` or `Reset` on the same `Agent`.
 - model routing and harness recipes
 - transport and downstream protocol translation
 
-The DeepSeek and Ollama adapters validate the model seam. The JSONL process is
-a reference transport, not mandatory framework semantics.
+The OpenAI-compatible provider validates the model seam against three real
+servers. The JSONL process is a reference transport, not mandatory framework
+semantics.
 
 The first-party `tool/bash` package is replaceable policy implemented through
 the existing `Tool` seam. The reference commands opt into it; the `agent`
@@ -79,8 +82,8 @@ package does not discover or grant process capabilities.
 ### Experimental public contract
 
 Package `agent` is intended for external Go embedders. Its responsibility is
-one conversation-scoped model/tool loop. Provider wire details live in public
-adapter packages; the agent package does not own provider selection, process
+one conversation-scoped model/tool loop. Provider wire details live outside
+the `agent` package; the agent package does not own provider selection, process
 transport, or durable task state.
 
 `WithHistory` is an experimental construction-time seam for restoring the
@@ -99,7 +102,7 @@ Evolution strategy:
 
 - breaking changes are allowed before the first stable release
 - changes require executable contract tests
-- the API becomes stable only after independent adapters expose shared
+- the API becomes stable only after independent provider implementations expose shared
   semantics
 
 ### Private implementation

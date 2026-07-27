@@ -84,48 +84,58 @@ to implement or validate every JSON Schema draft or provider subset.
 - DeepSeek accepts function `parameters` using JSON Schema semantics. Its
   strict mode is a beta API with a narrower supported subset, so J-agent does not
   enable strict mode or promise that every schema will be accepted.
-- Ollama's native chat API accepts the same function/parameters shape, but
-  actual enforcement still depends on the selected local model.
+- Ollama's OpenAI-compatible API accepts the same function/parameters shape,
+  but actual enforcement still depends on the selected local model.
 
-Adapters pass the caller's schema through without rewriting it. Provider
+Providers pass the caller's schema through without rewriting it. Provider
 rejection remains explicit. A cross-provider schema normalizer should wait
 until incompatible real tools demonstrate a stable transformation rule.
 
-## DeepSeek and Ollama mapping
+## OpenAI-compatible provider mapping
 
 Provider sources:
 
 - [DeepSeek Chat Completions](https://api-docs.deepseek.com/api/create-chat-completion)
 - [DeepSeek thinking and tool continuation](https://api-docs.deepseek.com/guides/thinking_mode)
 - [DeepSeek context cache](https://api-docs.deepseek.com/zh-cn/guides/kv_cache/)
-- [Ollama tool calling](https://docs.ollama.com/capabilities/tool-calling)
-- [Ollama usage metrics](https://docs.ollama.com/api/usage)
+- [Ollama OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)
+- [oMLX repository and tiered KV cache](https://github.com/jundot/omlx)
 
-| J-agent concept | DeepSeek | Ollama |
-| --- | --- | --- |
-| endpoint | `/chat/completions` | `/api/chat` |
-| stream framing | SSE `data:` records | newline-delimited JSON |
-| reasoning | `reasoning_content` | `thinking` |
-| tool call arguments | JSON encoded as a string | JSON object |
-| tool result correlation | `tool_call_id` | `tool_name` |
-| stop reason | `finish_reason` | `done_reason` plus observed tool calls |
-| input/output usage | `prompt_tokens` / `completion_tokens` | `prompt_eval_count` / `eval_count` |
-| cache/reasoning usage | reported when available | not reported by chat usage |
+| J-agent concept | DeepSeek | Ollama | oMLX |
+| --- | --- | --- | --- |
+| base URL recipe | `https://api.deepseek.com` | `http://127.0.0.1:11434/v1` | `http://127.0.0.1:8000/v1` |
+| endpoint and stream | `/chat/completions`, SSE | `/chat/completions`, SSE | `/chat/completions`, SSE |
+| retained reasoning field | `reasoning_content` | `reasoning` | `reasoning_content` |
+| tool call arguments | JSON encoded as a string | JSON encoded as a string | JSON encoded as a string |
+| tool result correlation | `tool_call_id` | `tool_call_id` | `tool_call_id` |
+| stop reason | `finish_reason` | `finish_reason` | `finish_reason` |
+| input/output usage | `prompt_tokens` / `completion_tokens` | `prompt_tokens` / `completion_tokens` | `prompt_tokens` / `completion_tokens` |
+| cache usage | DeepSeek cache fields | not reported by chat usage | `prompt_tokens_details.cached_tokens` |
 
-The adapter boundary absorbs these differences. None of them appear as
-provider-specific conditionals in the agent loop.
+One `provider/openai` implementation owns this narrow Chat Completions
+contract. Its typed `ReasoningField` setting covers the only request-history
+shape difference observed in tool continuation; the response reader accepts
+both reasoning fields. It does not expose a generic extra-body map, provider
+profile registry, or arbitrary compatibility hook. None of these differences
+appear as conditionals in the agent loop.
 
 DeepSeek enables its context cache automatically. J-agent does not send a
 provider-specific cache switch: its ordered, append-only transcript preserves
 the exact request prefix needed for reuse across conversation turns. The
-adapter maps `prompt_cache_hit_tokens` to `Usage.CachedInputTokens`.
+provider maps `prompt_cache_hit_tokens` to `Usage.CachedInputTokens`.
 `prompt_cache_miss_tokens` remains derivable as
 `Usage.InputTokens - Usage.CachedInputTokens`, because DeepSeek defines prompt
-tokens as the sum of cache hits and misses. The adapter keeps
+tokens as the sum of cache hits and misses. The provider keeps
 `CachedInputTokens` nil when the provider reports neither cache field, so an
 unreported metric is not confused with an observed zero hit. Cache population
 is best effort and therefore remains an observed usage result, not a runtime
 guarantee.
+
+oMLX exposes a separate server-owned KV/prefix cache. The provider does not send
+a fictitious client cache switch. It maps oMLX's observed
+`prompt_tokens_details.cached_tokens` metric to `Usage.CachedInputTokens`, while
+the ordered J-agent transcript supplies the stable prefix that makes reuse
+possible.
 
 ## Deliberately not generalized
 
@@ -146,6 +156,7 @@ semantics.
 
 ## Stability
 
-The model seam and `j-agent` protocol remain experimental. Two adapters validate
-that the current boundary is useful; external consumers and production
+The model seam and `j-agent` protocol remain experimental. One provider
+implementation exercised against three servers shows that the current boundary
+is useful, but independent implementations, external consumers, and production
 experience are still required before a compatibility promise is justified.

@@ -1,6 +1,6 @@
-// Package deepseek provides an experimental adapter from DeepSeek's Chat
-// Completions API to agent.Model.
-package deepseek
+// Package openai provides an experimental OpenAI-compatible Chat Completions
+// provider for agent.Model.
+package openai
 
 import (
 	"bufio"
@@ -18,95 +18,97 @@ import (
 	"github.com/z-chenhao/J/J-agent/agent"
 )
 
-const (
-	defaultBaseURL  = "https://api.deepseek.com"
-	maxResponseSize = 16 << 20
-)
+const maxResponseSize = 16 << 20
 
-// Thinking controls DeepSeek thinking mode.
-type Thinking string
+// ReasoningField controls how retained reasoning is represented in assistant
+// messages sent back during tool continuation.
+type ReasoningField string
 
 const (
-	ThinkingDefault  Thinking = ""
-	ThinkingEnabled  Thinking = "enabled"
-	ThinkingDisabled Thinking = "disabled"
+	ReasoningFieldOmit             ReasoningField = ""
+	ReasoningFieldReasoningContent ReasoningField = "reasoning_content"
+	ReasoningFieldReasoning        ReasoningField = "reasoning"
 )
 
-// ReasoningEffort controls DeepSeek reasoning effort when thinking is enabled.
+// ReasoningEffort controls the OpenAI-compatible reasoning_effort request
+// field. Individual servers and models may support only a subset.
 type ReasoningEffort string
 
 const (
-	ReasoningDefault ReasoningEffort = ""
-	ReasoningHigh    ReasoningEffort = "high"
-	ReasoningMax     ReasoningEffort = "max"
+	ReasoningEffortDefault ReasoningEffort = ""
+	ReasoningEffortNone    ReasoningEffort = "none"
+	ReasoningEffortLow     ReasoningEffort = "low"
+	ReasoningEffortMedium  ReasoningEffort = "medium"
+	ReasoningEffortHigh    ReasoningEffort = "high"
+	ReasoningEffortMax     ReasoningEffort = "max"
 )
 
-// Config configures one DeepSeek model adapter.
+// Config configures one OpenAI-compatible Chat Completions provider.
 type Config struct {
 	APIKey          string
 	Model           string
 	BaseURL         string
-	Thinking        Thinking
+	ReasoningField  ReasoningField
 	ReasoningEffort ReasoningEffort
 	HTTPClient      *http.Client
 }
 
-// Model implements agent.Model using DeepSeek's streaming Chat Completions API.
+// Model implements agent.Model using an OpenAI-compatible streaming Chat
+// Completions API.
 type Model struct {
 	apiKey          string
 	model           string
 	endpoint        string
-	thinking        Thinking
+	reasoningField  ReasoningField
 	reasoningEffort ReasoningEffort
 	client          *http.Client
 }
 
-// HTTPError reports a non-successful DeepSeek HTTP response.
+// HTTPError reports a non-successful provider HTTP response.
 type HTTPError struct {
 	StatusCode int
 	Message    string
 }
 
 func (err *HTTPError) Error() string {
-	return fmt.Sprintf("deepseek HTTP %d: %s", err.StatusCode, err.Message)
+	return fmt.Sprintf("openai provider HTTP %d: %s", err.StatusCode, err.Message)
 }
 
-// New validates config and creates a DeepSeek adapter.
+// New validates config and creates an OpenAI-compatible provider.
 func New(config Config) (*Model, error) {
 	config.APIKey = strings.TrimSpace(config.APIKey)
 	config.Model = strings.TrimSpace(config.Model)
 	config.BaseURL = strings.TrimSpace(config.BaseURL)
-	if config.APIKey == "" {
-		return nil, errors.New("deepseek API key is required")
-	}
 	if config.Model == "" {
-		return nil, errors.New("deepseek model is required")
+		return nil, errors.New("openai provider model is required")
 	}
 	if config.BaseURL == "" {
-		config.BaseURL = defaultBaseURL
+		return nil, errors.New("openai provider base URL is required")
 	}
 	parsed, err := url.Parse(config.BaseURL)
 	if err != nil || parsed.Host == "" || parsed.User != nil ||
 		(!strings.EqualFold(parsed.Scheme, "http") && !strings.EqualFold(parsed.Scheme, "https")) ||
 		parsed.ForceQuery || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return nil, errors.New(
-			"deepseek base URL must use HTTP or HTTPS and must not contain credentials, a query, or a fragment",
+			"openai provider base URL must use HTTP or HTTPS and must not contain credentials, a query, or a fragment",
 		)
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/chat/completions"
 	parsed.RawPath = ""
-	switch config.Thinking {
-	case ThinkingDefault, ThinkingEnabled, ThinkingDisabled:
+	switch config.ReasoningField {
+	case ReasoningFieldOmit, ReasoningFieldReasoningContent, ReasoningFieldReasoning:
 	default:
-		return nil, fmt.Errorf("unsupported deepseek thinking mode %q", config.Thinking)
+		return nil, fmt.Errorf("unsupported reasoning field %q", config.ReasoningField)
 	}
 	switch config.ReasoningEffort {
-	case ReasoningDefault, ReasoningHigh, ReasoningMax:
+	case ReasoningEffortDefault,
+		ReasoningEffortNone,
+		ReasoningEffortLow,
+		ReasoningEffortMedium,
+		ReasoningEffortHigh,
+		ReasoningEffortMax:
 	default:
-		return nil, fmt.Errorf("unsupported deepseek reasoning effort %q", config.ReasoningEffort)
-	}
-	if config.Thinking == ThinkingDisabled && config.ReasoningEffort != ReasoningDefault {
-		return nil, errors.New("deepseek reasoning effort requires thinking mode")
+		return nil, fmt.Errorf("unsupported reasoning effort %q", config.ReasoningEffort)
 	}
 	if config.HTTPClient == nil {
 		config.HTTPClient = http.DefaultClient
@@ -115,7 +117,7 @@ func New(config Config) (*Model, error) {
 		apiKey:          config.APIKey,
 		model:           config.Model,
 		endpoint:        parsed.String(),
-		thinking:        config.Thinking,
+		reasoningField:  config.ReasoningField,
 		reasoningEffort: config.ReasoningEffort,
 		client:          config.HTTPClient,
 	}, nil
@@ -127,7 +129,6 @@ type chatRequest struct {
 	Tools           []chatTool    `json:"tools,omitempty"`
 	Stream          bool          `json:"stream"`
 	StreamOptions   streamOptions `json:"stream_options"`
-	Thinking        *thinking     `json:"thinking,omitempty"`
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
 }
 
@@ -135,14 +136,11 @@ type streamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
 
-type thinking struct {
-	Type string `json:"type"`
-}
-
 type chatMessage struct {
 	Role             string     `json:"role"`
 	Content          *string    `json:"content"`
 	ReasoningContent string     `json:"reasoning_content,omitempty"`
+	Reasoning        string     `json:"reasoning,omitempty"`
 	ToolCalls        []toolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string     `json:"tool_call_id,omitempty"`
 }
@@ -184,15 +182,19 @@ type choice struct {
 type delta struct {
 	Content          string     `json:"content"`
 	ReasoningContent string     `json:"reasoning_content"`
+	Reasoning        string     `json:"reasoning"`
 	ToolCalls        []toolCall `json:"tool_calls"`
 }
 
 type usage struct {
-	PromptTokens           int64  `json:"prompt_tokens"`
-	CompletionTokens       int64  `json:"completion_tokens"`
-	TotalTokens            int64  `json:"total_tokens"`
-	PromptCacheHitTokens   *int64 `json:"prompt_cache_hit_tokens"`
-	PromptCacheMissTokens  *int64 `json:"prompt_cache_miss_tokens"`
+	PromptTokens          int64  `json:"prompt_tokens"`
+	CompletionTokens      int64  `json:"completion_tokens"`
+	TotalTokens           int64  `json:"total_tokens"`
+	PromptCacheHitTokens  *int64 `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens *int64 `json:"prompt_cache_miss_tokens"`
+	PromptTokenDetails    *struct {
+		CachedTokens *int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 	CompletionTokenDetails *struct {
 		ReasoningTokens int64 `json:"reasoning_tokens"`
 	} `json:"completion_tokens_details"`
@@ -204,7 +206,7 @@ type callAccumulator struct {
 	arguments string
 }
 
-// Complete streams and returns one complete DeepSeek assistant response.
+// Complete streams and returns one complete assistant response.
 func (m *Model) Complete(
 	ctx context.Context,
 	request agent.ModelRequest,
@@ -216,18 +218,20 @@ func (m *Model) Complete(
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return agent.ModelResponse{}, fmt.Errorf("encode deepseek request: %w", err)
+		return agent.ModelResponse{}, fmt.Errorf("encode openai provider request: %w", err)
 	}
 	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, m.endpoint, bytes.NewReader(body))
 	if err != nil {
-		return agent.ModelResponse{}, fmt.Errorf("create deepseek request: %w", err)
+		return agent.ModelResponse{}, fmt.Errorf("create openai provider request: %w", err)
 	}
-	httpRequest.Header.Set("Authorization", "Bearer "+m.apiKey)
+	if m.apiKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+m.apiKey)
+	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 
 	response, err := m.client.Do(httpRequest)
 	if err != nil {
-		return agent.ModelResponse{}, fmt.Errorf("call deepseek: %w", err)
+		return agent.ModelResponse{}, fmt.Errorf("call openai provider: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
@@ -240,9 +244,9 @@ func (m *Model) Complete(
 func (m *Model) request(request agent.ModelRequest) (chatRequest, error) {
 	messages := make([]chatMessage, len(request.Messages))
 	for i, message := range request.Messages {
-		mapped, err := mapMessage(message)
+		mapped, err := mapMessage(message, m.reasoningField)
 		if err != nil {
-			return chatRequest{}, fmt.Errorf("deepseek message %d: %w", i, err)
+			return chatRequest{}, fmt.Errorf("openai provider message %d: %w", i, err)
 		}
 		messages[i] = mapped
 	}
@@ -258,29 +262,27 @@ func (m *Model) request(request agent.ModelRequest) (chatRequest, error) {
 		}
 	}
 	payload := chatRequest{
-		Model:         m.model,
-		Messages:      messages,
-		Tools:         tools,
-		Stream:        true,
-		StreamOptions: streamOptions{IncludeUsage: true},
+		Model:           m.model,
+		Messages:        messages,
+		Tools:           tools,
+		Stream:          true,
+		StreamOptions:   streamOptions{IncludeUsage: true},
+		ReasoningEffort: string(m.reasoningEffort),
 	}
-	if m.thinking != ThinkingDefault {
-		payload.Thinking = &thinking{Type: string(m.thinking)}
-	}
-	payload.ReasoningEffort = string(m.reasoningEffort)
 	return payload, nil
 }
 
-func mapMessage(message agent.Message) (chatMessage, error) {
+func mapMessage(message agent.Message, reasoningField ReasoningField) (chatMessage, error) {
 	mapped := chatMessage{Role: string(message.Role)}
 	var text string
+	var reasoning string
 	var calls []toolCall
 	for _, content := range message.Content {
 		switch content.Type {
 		case agent.ContentText:
 			text += content.Text
 		case agent.ContentReasoning:
-			mapped.ReasoningContent += content.Text
+			reasoning += content.Text
 		case agent.ContentToolCall:
 			if content.ToolCall == nil {
 				return chatMessage{}, errors.New("tool-call content is missing its call")
@@ -299,17 +301,23 @@ func mapMessage(message agent.Message) (chatMessage, error) {
 	}
 	switch message.Role {
 	case agent.RoleSystem, agent.RoleUser:
-		if len(calls) > 0 || mapped.ReasoningContent != "" {
+		if len(calls) > 0 || reasoning != "" {
 			return chatMessage{}, fmt.Errorf("role %q cannot contain reasoning or tool calls", message.Role)
 		}
 		mapped.Content = &text
 	case agent.RoleAssistant:
 		mapped.ToolCalls = calls
+		switch reasoningField {
+		case ReasoningFieldReasoningContent:
+			mapped.ReasoningContent = reasoning
+		case ReasoningFieldReasoning:
+			mapped.Reasoning = reasoning
+		}
 		if text != "" {
 			mapped.Content = &text
 		}
 	case agent.RoleTool:
-		if len(calls) > 0 || mapped.ReasoningContent != "" {
+		if len(calls) > 0 || reasoning != "" {
 			return chatMessage{}, errors.New("tool messages cannot contain reasoning or tool calls")
 		}
 		if strings.TrimSpace(message.ToolCallID) == "" {
@@ -351,25 +359,33 @@ func (m *Model) readStream(reader io.Reader, emit func(agent.ModelDelta)) (agent
 		}
 		var chunk streamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			return agent.ModelResponse{}, fmt.Errorf("decode deepseek stream: %w", err)
+			return agent.ModelResponse{}, fmt.Errorf("decode openai provider stream: %w", err)
 		}
 		if chunk.Error != nil {
-			return agent.ModelResponse{}, fmt.Errorf("deepseek: %s", chunk.Error.Message)
+			return agent.ModelResponse{}, fmt.Errorf("openai provider: %s", chunk.Error.Message)
 		}
 		if chunk.ID != "" {
 			responseID = chunk.ID
 		}
-		if chunk.Model != "" {
+		if chunk.Model != "" && chunk.Model != "keepalive" {
 			responseModel = chunk.Model
 		}
 		if chunk.Usage != nil {
 			tokenUsage = mapUsage(chunk.Usage)
 		}
 		for _, choice := range chunk.Choices {
-			if choice.Delta.ReasoningContent != "" {
-				reasoning += choice.Delta.ReasoningContent
+			reasoningDelta := choice.Delta.ReasoningContent
+			if reasoningDelta == "" {
+				reasoningDelta = choice.Delta.Reasoning
+			}
+			if reasoningDelta != "" {
+				reasoning += reasoningDelta
 				if emit != nil {
-					emit(agent.ModelDelta{Type: agent.DeltaReasoning, Index: 0, Delta: choice.Delta.ReasoningContent})
+					emit(agent.ModelDelta{
+						Type:  agent.DeltaReasoning,
+						Index: 0,
+						Delta: reasoningDelta,
+					})
 				}
 			}
 			if choice.Delta.Content != "" {
@@ -403,10 +419,10 @@ func (m *Model) readStream(reader io.Reader, emit func(agent.ModelDelta)) (agent
 		}
 	}
 	if err := scanner.Err(); err != nil {
-		return agent.ModelResponse{}, fmt.Errorf("read deepseek stream: %w", err)
+		return agent.ModelResponse{}, fmt.Errorf("read openai provider stream: %w", err)
 	}
 	if !sawDone {
-		return agent.ModelResponse{}, errors.New("deepseek stream ended before [DONE]")
+		return agent.ModelResponse{}, errors.New("openai provider stream ended before [DONE]")
 	}
 	stopReason, err := mapStopReason(finishReason)
 	if err != nil {
@@ -441,7 +457,7 @@ func (m *Model) readStream(reader io.Reader, emit func(agent.ModelDelta)) (agent
 			Role:    agent.RoleAssistant,
 			Content: content,
 		},
-		Provider:   "deepseek",
+		Provider:   "openai",
 		Model:      responseModel,
 		ResponseID: responseID,
 		StopReason: stopReason,
@@ -456,11 +472,14 @@ func mapUsage(value *usage) *agent.Usage {
 		TotalTokens:  value.TotalTokens,
 	}
 	switch {
+	case value.PromptTokenDetails != nil && value.PromptTokenDetails.CachedTokens != nil:
+		cached := *value.PromptTokenDetails.CachedTokens
+		result.CachedInputTokens = &cached
 	case value.PromptCacheHitTokens != nil:
 		cached := *value.PromptCacheHitTokens
 		result.CachedInputTokens = &cached
-	case value.PromptCacheMissTokens != nil:
-		cached := max(value.PromptTokens-*value.PromptCacheMissTokens, 0)
+	case value.PromptCacheMissTokens != nil && value.PromptTokens >= *value.PromptCacheMissTokens:
+		cached := value.PromptTokens - *value.PromptCacheMissTokens
 		result.CachedInputTokens = &cached
 	}
 	if value.CompletionTokenDetails != nil {
@@ -481,9 +500,9 @@ func mapStopReason(value string) (agent.StopReason, error) {
 	case "content_filter":
 		return agent.StopReasonContentFilter, nil
 	case "insufficient_system_resource":
-		return "", errors.New("deepseek stopped because of insufficient system resources")
+		return "", errors.New("openai provider reported insufficient system resources")
 	default:
-		return "", fmt.Errorf("deepseek returned unsupported finish reason %q", value)
+		return "", fmt.Errorf("openai provider returned unsupported finish reason %q", value)
 	}
 }
 

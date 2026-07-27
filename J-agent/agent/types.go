@@ -82,7 +82,7 @@ func TextMessage(role Role, text string) Message {
 }
 
 // ToolSpec describes a tool to a model. InputSchema must be a JSON object using
-// JSON Schema semantics understood by the selected model adapter.
+// JSON Schema semantics understood by the selected model provider.
 type ToolSpec struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`

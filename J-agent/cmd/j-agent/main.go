@@ -10,10 +10,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/z-chenhao/J/J-agent/adapter/deepseek"
-	"github.com/z-chenhao/J/J-agent/adapter/ollama"
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/internal/runtime"
+	"github.com/z-chenhao/J/J-agent/provider/openai"
 	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
 )
 
@@ -21,7 +20,8 @@ type config struct {
 	provider        string
 	model           string
 	baseURL         string
-	thinking        string
+	apiKeyEnv       string
+	reasoningField  string
 	reasoningEffort string
 	rpc             bool
 	prompt          []string
@@ -70,15 +70,26 @@ func parseConfig(args []string) (config, error) {
 	flags := flag.NewFlagSet("j", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
 	var config config
-	flags.StringVar(&config.provider, "provider", env("J_AGENT_PROVIDER"), "model provider: deepseek or ollama")
+	flags.StringVar(&config.provider, "provider", env("J_AGENT_PROVIDER"), "model provider: openai")
 	flags.StringVar(&config.model, "model", env("J_AGENT_MODEL"), "provider model name")
 	flags.StringVar(&config.baseURL, "base-url", env("J_AGENT_BASE_URL"), "provider API base URL")
-	flags.StringVar(&config.thinking, "thinking", env("J_AGENT_THINKING"), "thinking mode: default, enabled, or disabled")
+	flags.StringVar(
+		&config.apiKeyEnv,
+		"api-key-env",
+		env("J_AGENT_API_KEY_ENV"),
+		"environment variable containing the provider API key",
+	)
+	flags.StringVar(
+		&config.reasoningField,
+		"reasoning-field",
+		env("J_AGENT_REASONING_FIELD"),
+		"assistant reasoning history field: omit, reasoning_content, or reasoning",
+	)
 	flags.StringVar(
 		&config.reasoningEffort,
 		"reasoning-effort",
 		env("J_AGENT_REASONING_EFFORT"),
-		"DeepSeek reasoning effort: default, high, or max",
+		"OpenAI-compatible reasoning effort: default, none, low, medium, high, or max",
 	)
 	flags.BoolVar(&config.rpc, "rpc", false, "run the JSONL transport")
 	if err := flags.Parse(args); err != nil {
@@ -87,77 +98,69 @@ func parseConfig(args []string) (config, error) {
 	config.provider = strings.ToLower(strings.TrimSpace(config.provider))
 	config.model = strings.TrimSpace(config.model)
 	config.baseURL = strings.TrimSpace(config.baseURL)
-	config.thinking = strings.ToLower(strings.TrimSpace(config.thinking))
+	config.apiKeyEnv = strings.TrimSpace(config.apiKeyEnv)
+	config.reasoningField = strings.ToLower(strings.TrimSpace(config.reasoningField))
 	config.reasoningEffort = strings.ToLower(strings.TrimSpace(config.reasoningEffort))
-	if config.thinking == "" {
-		config.thinking = "default"
+	if config.provider == "" {
+		config.provider = "openai"
+	}
+	if config.apiKeyEnv == "" {
+		config.apiKeyEnv = "OPENAI_API_KEY"
+	}
+	if config.reasoningField == "" {
+		config.reasoningField = "omit"
 	}
 	if config.reasoningEffort == "" {
 		config.reasoningEffort = "default"
 	}
 	config.prompt = flags.Args()
-	if config.provider == "" {
-		return config, errors.New("--provider or J_AGENT_PROVIDER is required")
-	}
 	if config.model == "" {
 		return config, errors.New("--model or J_AGENT_MODEL is required")
 	}
-	switch config.thinking {
-	case "default", "enabled", "disabled":
+	if config.baseURL == "" {
+		return config, errors.New("--base-url or J_AGENT_BASE_URL is required")
+	}
+	if config.provider != "openai" {
+		return config, fmt.Errorf("unsupported provider %q", config.provider)
+	}
+	switch config.reasoningField {
+	case "omit", "reasoning_content", "reasoning":
 	default:
-		return config, fmt.Errorf("unsupported thinking mode %q", config.thinking)
+		return config, fmt.Errorf("unsupported reasoning field %q", config.reasoningField)
 	}
 	switch config.reasoningEffort {
-	case "default", "high", "max":
+	case "default", "none", "low", "medium", "high", "max":
 	default:
 		return config, fmt.Errorf("unsupported reasoning effort %q", config.reasoningEffort)
-	}
-	if config.provider != "deepseek" && config.reasoningEffort != "default" {
-		return config, errors.New("--reasoning-effort is supported only by deepseek")
 	}
 	return config, nil
 }
 
 func buildModel(config config) (agent.Model, error) {
-	switch config.provider {
-	case "deepseek":
-		thinking := deepseek.ThinkingDefault
-		switch config.thinking {
-		case "enabled":
-			thinking = deepseek.ThinkingEnabled
-		case "disabled":
-			thinking = deepseek.ThinkingDisabled
-		}
-		reasoningEffort := deepseek.ReasoningDefault
-		switch config.reasoningEffort {
-		case "high":
-			reasoningEffort = deepseek.ReasoningHigh
-		case "max":
-			reasoningEffort = deepseek.ReasoningMax
-		}
-		return deepseek.New(deepseek.Config{
-			APIKey:          env("DEEPSEEK_API_KEY"),
-			Model:           config.model,
-			BaseURL:         config.baseURL,
-			Thinking:        thinking,
-			ReasoningEffort: reasoningEffort,
-		})
-	case "ollama":
-		thinking := ollama.ThinkingDefault
-		switch config.thinking {
-		case "enabled":
-			thinking = ollama.ThinkingEnabled
-		case "disabled":
-			thinking = ollama.ThinkingDisabled
-		}
-		return ollama.New(ollama.Config{
-			Model:    config.model,
-			BaseURL:  config.baseURL,
-			Thinking: thinking,
-		})
-	default:
+	if config.provider != "openai" {
 		return nil, fmt.Errorf("unsupported provider %q", config.provider)
 	}
+	return openai.New(openai.Config{
+		APIKey:          env(config.apiKeyEnv),
+		Model:           config.model,
+		BaseURL:         config.baseURL,
+		ReasoningField:  parseReasoningField(config.reasoningField),
+		ReasoningEffort: openai.ReasoningEffort(config.reasoningEffortValue()),
+	})
+}
+
+func (config config) reasoningEffortValue() string {
+	if config.reasoningEffort == "default" {
+		return ""
+	}
+	return config.reasoningEffort
+}
+
+func parseReasoningField(value string) openai.ReasoningField {
+	if value == "omit" {
+		return openai.ReasoningFieldOmit
+	}
+	return openai.ReasoningField(value)
 }
 
 func env(name string) string {

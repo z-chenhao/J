@@ -3,7 +3,7 @@
 This is the single repository-level source for J's architecture, module
 ownership, extension strategy, and accumulated design conclusions.
 
-Last reviewed: 2026-07-26.
+Last reviewed: 2026-07-27.
 
 ## 1. Concrete goal
 
@@ -16,10 +16,11 @@ kernel. J-tui and J-mem are first-party consumers used to prove that the public
 seams are sufficient for real customization.
 
 Current verified consumers of J-agent are its reference CLI, private JSONL
-runtime, and J-tui. DeepSeek and Ollama independently exercise the model seam.
-J-tui consumes the public event and cancellation seams without a runtime API
-change. J-mem is an explicit project boundary but does not yet count as a
-validating implementation.
+runtime, and J-tui. One OpenAI-compatible provider exercises the model seam
+against DeepSeek, Ollama, and oMLX; these servers do not count as independent
+`Model` implementations. J-tui consumes the public event and cancellation
+seams without a runtime API change. J-mem is an explicit project boundary but
+does not yet count as a validating implementation.
 
 ## 2. Engineering constitution
 
@@ -114,10 +115,16 @@ J-agent currently opens four orthogonal composition seams:
 
 | Seam | Purpose | Stability |
 | --- | --- | --- |
-| `Model` | Provider adapters, routing, research Harness wrappers | Experimental |
-| `Tool` | External capabilities, memory tools, MCP adapters, delegation | Experimental |
+| `Model` | Providers, routing, research Harness wrappers | Experimental |
+| `Tool` | External capabilities, memory tools, MCP bridges, delegation | Experimental |
 | `EventHandler` | TUI, gateway, logs, metrics | Experimental |
 | `History` / `WithHistory` | External transcript persistence and restoration | Experimental |
+
+One concrete OpenAI-compatible provider serves DeepSeek, Ollama, and the local
+oMLX integration behind the `Model` seam. This is protocol reuse, not three
+independent `Model` implementations. oMLX owns KV/prefix-cache storage and
+policy; J-agent owns only ordered transcript continuity and provider-reported
+usage normalization.
 
 `WithHistory` is intentionally construction-only. The restored transcript is
 authoritative, including any system message. J-agent validates message shape,
@@ -202,8 +209,9 @@ Rejected alternatives:
 
 J-tui is a minimal terminal UI. It calls J-agent, consumes lifecycle events,
 reads transcript snapshots, and cancels runs through `context.Context`.
-Its command may explicitly compose an existing Ollama or DeepSeek adapter; it
-does not own dynamic model routing or provider discovery.
+Its command explicitly composes the OpenAI-compatible provider with an
+operator-selected endpoint; it does not own dynamic model routing or provider
+discovery.
 
 DeepSeek context caching requires no new runtime mechanism: the service enables
 it automatically, and J-agent's ordered transcript makes each new turn an
@@ -302,7 +310,8 @@ Potential future mechanisms must be validated in this order:
   `1.26.x` patch, repository development selects at least Go 1.26.5, and J does
   not maintain an older-version matrix without a real consumer.
 - J-agent remains a separate Go module under `J/J-agent`.
-- DeepSeek and Ollama are real adapters; demo models are not product features.
+- The OpenAI-compatible provider is real integration code; backend profiles and
+  demo models are not product features.
 - J-Space research informs model/Harness choices but is not a runtime
   integration or README identity.
 - Reasoning content is preserved when provider continuation requires it.

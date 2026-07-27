@@ -6,25 +6,41 @@ transcript invariants in J-agent.
 
 ## Run
 
-J-tui directly composes one existing J-agent adapter. Ollama remains the
-default provider, an explicit model is required, and the first-party Bash tool
-is enabled in the command's current working directory:
+J-tui directly composes J-agent's OpenAI-compatible provider. The repository's
+local development recipe selects the oMLX model
+`Qwen3.6-35B-A3B-oQ4e-mtp`; the first-party Bash tool is enabled in the
+command's current working directory:
 
 ```bash
-go run ./cmd/j-tui --model qwen3.6:27b-q4_K_M
+make run
 ```
 
-DeepSeek uses the existing `DEEPSEEK_API_KEY` environment variable:
+The equivalent explicit invocation is:
 
 ```bash
 go run ./cmd/j-tui \
-  --provider deepseek \
-  --model deepseek-v4-flash \
-  --thinking disabled
+  --provider openai \
+  --model Qwen3.6-35B-A3B-oQ4e-mtp \
+  --base-url http://127.0.0.1:8000/v1 \
+  --api-key-env OMLX_API_KEY \
+  --reasoning-field reasoning_content
 ```
 
-This explicit selector is command composition, not a model router. J-tui does
-not discover providers or change providers during a conversation.
+Set `OMLX_API_KEY` when the local server requires authentication. DeepSeek
+uses the same provider with its own endpoint and credential environment:
+
+```bash
+go run ./cmd/j-tui \
+  --provider openai \
+  --model deepseek-v4-flash \
+  --base-url https://api.deepseek.com \
+  --api-key-env DEEPSEEK_API_KEY \
+  --reasoning-field reasoning_content
+```
+
+Ollama uses `--base-url http://127.0.0.1:11434/v1` and, when reasoning history
+is required for tool continuation, `--reasoning-field reasoning`. These are
+explicit command recipes, not provider discovery or a model router.
 
 Run J-tui inside the repository container when commands must be isolated from
 the host:
@@ -35,25 +51,31 @@ docker run --rm -it \
   -v "$PWD:/workspace" \
   --entrypoint j-tui \
   j:dev \
+  --provider openai \
   --model qwen3.6:27b-q4_K_M \
-  --base-url http://host.docker.internal:11434
+  --base-url http://host.docker.internal:11434/v1 \
+  --reasoning-field reasoning
 ```
 
 J-tui renders tool activity but does not authorize or sandbox commands. Mounts,
 credentials, networking, and resource limits belong to the container operator.
 
-### DeepSeek prompt cache
+### Prompt and KV cache
 
 DeepSeek's context cache is enabled automatically by the service; it does not
-define a client-side enable flag. J-tui preserves one J-agent transcript and
-appends each turn, so the next DeepSeek request retains the exact prior message
-prefix required for a cache hit. JSON mode does the same when several prompts
-are passed to one invocation.
+define a client-side enable flag. oMLX owns its configurable hot-memory and SSD
+KV/prefix cache. J-tui does not pretend to enable either provider's server-side
+storage: it preserves one J-agent transcript and appends each turn, so the next
+request retains the exact prior message prefix required for reuse. JSON mode
+does the same when several prompts are passed to one invocation.
 
 The footer reports provider-observed cache hit and miss tokens. JSON event mode
 keeps `usage.inputTokens` and `usage.cachedInputTokens`; cache misses are
-`inputTokens - cachedInputTokens`. Cache population and hits remain
-best-effort service behavior and cannot be guaranteed by the client.
+`inputTokens - cachedInputTokens`. The OpenAI-compatible provider maps
+`prompt_tokens_details.cached_tokens` into that same provider-neutral usage
+field and also understands DeepSeek's cache hit fields. Cache population and
+hits remain best-effort service behavior and cannot be guaranteed by the
+client.
 
 The editor uses:
 
@@ -98,8 +120,11 @@ that mechanism without adopting Pi's protocol or product-level session events:
 ```bash
 go run ./cmd/j-tui \
   --mode json \
-  --model qwen3.6:27b-q4_K_M \
-  --thinking enabled \
+  --provider openai \
+  --model Qwen3.6-35B-A3B-oQ4e-mtp \
+  --base-url http://127.0.0.1:8000/v1 \
+  --api-key-env OMLX_API_KEY \
+  --reasoning-field reasoning_content \
   "Use bash to run pwd, then report the output."
 ```
 
@@ -131,11 +156,11 @@ The TUI reducer keeps this mapping private to J-tui:
 | canceled `context.Context` | canceled state |
 
 Tests exercise complete tool and failure event sequences with deterministic
-models. A local Ollama run exercises the real streaming adapter and Bash tool
-paths:
+models. The default local oMLX run exercises the real streaming provider and
+Bash tool paths:
 
 ```bash
-make trace MODEL=qwen3.6:27b-q4_K_M
+make trace
 ```
 
 ## Boundary

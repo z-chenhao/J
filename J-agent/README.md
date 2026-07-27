@@ -10,13 +10,13 @@ J-agent is a minimal, customizable agent runtime for Go.
 J-agent keeps only the mechanisms required to run a model/tool loop:
 
 - ordered text, reasoning, and tool-call content
-- explicit model and tool adapter contracts
+- explicit model provider and tool contracts
 - streaming model output
 - context-governed execution and cancellation
 - conversation state
 - an optional FIFO task queue and typed JSONL event stream
 
-Everything else belongs in an adapter or product built on J-agent.
+Everything else belongs in a provider, Tool, or product built on J-agent.
 
 ## Relationship to J
 
@@ -42,41 +42,58 @@ The core does not provide:
 - Go 1.26 or newer; repository development selects Go 1.26.5 or a newer
   compatible toolchain
 
-## Use Ollama
+## OpenAI-compatible provider
 
-J-agent uses Ollama's native `/api/chat` protocol. Choose the model explicitly:
+J-agent has one experimental streaming Chat Completions provider. DeepSeek,
+oMLX, and Ollama are selected by endpoint and model, not separate runtime
+implementations. The base URL and model are deliberately explicit because
+server defaults and model names can change.
+
+The repository's local recipe uses oMLX:
 
 ```bash
 go run ./cmd/j-agent \
-  --provider ollama \
-  --model qwen3 \
+  --provider openai \
+  --model Qwen3.6-35B-A3B-oQ4e-mtp \
+  --base-url http://127.0.0.1:8000/v1 \
+  --api-key-env OMLX_API_KEY \
+  --reasoning-field reasoning_content \
   "Explain why small interfaces are useful."
 ```
 
-Set a custom endpoint with `--base-url` or `J_AGENT_BASE_URL`. Enable or disable
-thinking explicitly with `--thinking enabled` or `--thinking disabled`;
-`default` leaves the choice to Ollama.
-
-## Use DeepSeek
-
-J-agent uses DeepSeek's streaming Chat Completions protocol. The model name is
-deliberately required because provider model names and defaults can change.
+DeepSeek uses the same provider:
 
 ```bash
 export DEEPSEEK_API_KEY='...'
 
 go run ./cmd/j-agent \
-  --provider deepseek \
+  --provider openai \
   --model deepseek-v4-pro \
+  --base-url https://api.deepseek.com \
+  --api-key-env DEEPSEEK_API_KEY \
+  --reasoning-field reasoning_content \
   "Explain why small interfaces are useful."
 ```
 
-The API key is read only from `DEEPSEEK_API_KEY`, not from a command-line flag.
-Provider, model, base URL, and thinking mode may also be supplied through
-`J_AGENT_PROVIDER`, `J_AGENT_MODEL`, `J_AGENT_BASE_URL`, and
-`J_AGENT_THINKING`. DeepSeek reasoning
-effort is available as `--reasoning-effort high|max` or
+Ollama's OpenAI-compatible endpoint is typically
+`http://127.0.0.1:11434/v1`; use `--reasoning-field reasoning` when retained
+reasoning must be replayed during tool continuation. Use
+`--reasoning-field omit` for models that do not require reasoning history.
+`--reasoning-effort default|none|low|medium|high|max` sends the standard
+`reasoning_effort` field only when it is not `default`; the selected server and
+model decide which values they support.
+
+The API key itself is never accepted as a command-line value.
+`--api-key-env` names the environment variable to read and defaults to
+`OPENAI_API_KEY`. The equivalent environment configuration uses
+`J_AGENT_PROVIDER`, `J_AGENT_MODEL`, `J_AGENT_BASE_URL`,
+`J_AGENT_API_KEY_ENV`, `J_AGENT_REASONING_FIELD`, and
 `J_AGENT_REASONING_EFFORT`.
+
+DeepSeek and oMLX own their server-side prompt/KV caches. J-agent preserves the
+append-only message prefix and maps both DeepSeek cache fields and
+`prompt_tokens_details.cached_tokens` to `Usage.CachedInputTokens`. It sends no
+fictitious client-side cache switch.
 
 ## First-party Bash tool
 
@@ -95,9 +112,10 @@ docker build -t j:dev ..
 docker run --rm -i \
   -v "$PWD:/workspace" \
   j:dev \
-  --provider ollama \
-  --base-url http://host.docker.internal:11434 \
+  --provider openai \
+  --base-url http://host.docker.internal:11434/v1 \
   --model qwen3 \
+  --reasoning-field reasoning \
   "Use bash to run pwd."
 ```
 
@@ -113,7 +131,7 @@ composition policy outside J-agent.
 
 ## Embed J-agent
 
-Use a checked-in adapter or implement the small `agent.Model` contract:
+Use the checked-in provider or implement the small `agent.Model` contract:
 
 ```go
 package main
@@ -122,12 +140,15 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/z-chenhao/J/J-agent/adapter/ollama"
 	"github.com/z-chenhao/J/J-agent/agent"
+	"github.com/z-chenhao/J/J-agent/provider/openai"
 )
 
 func main() {
-	model, err := ollama.New(ollama.Config{Model: "qwen3"})
+	model, err := openai.New(openai.Config{
+		Model:   "qwen3",
+		BaseURL: "http://127.0.0.1:11434/v1",
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -161,9 +182,10 @@ history is authoritative, including any system message, so a non-empty
 `WithSystemPrompt` cannot be supplied at the same time. Storage format,
 durability, session identity, and retention policy remain application concerns.
 
-The `agent` package is experimental. Its seam is now exercised by two
-independent adapters, but stability will be declared only after real external
-consumers validate its semantics. See [Architecture](docs/architecture.md) and
+The `agent` package is experimental. One provider implementation is exercised
+against several real OpenAI-compatible servers, but that does not substitute
+for an independent provider implementation or external production consumers.
+See [Architecture](docs/architecture.md) and
 [model protocol research](docs/model-protocol.md).
 
 ## JSONL reference transport
@@ -173,7 +195,10 @@ Run:
 ```bash
 printf '%s\n' \
   '{"id":"1","type":"submit","message":"hello"}' |
-  go run ./cmd/j-agent --rpc --provider ollama --model qwen3
+  go run ./cmd/j-agent --rpc \
+    --provider openai \
+    --model qwen3 \
+    --base-url http://127.0.0.1:11434/v1
 ```
 
 The experimental `j-agent` protocol supports:
@@ -199,11 +224,10 @@ make check
 ## Project layout
 
 ```text
-adapter/deepseek/   DeepSeek protocol adapter
-adapter/ollama/     Ollama native protocol adapter
 agent/              experimental embeddable Go runtime
 cmd/j-agent/        reference CLI and JSONL process
 internal/runtime/   private queue and JSONL transport
+provider/openai/    experimental OpenAI-compatible provider
 tool/bash/          experimental first-party Bash Tool
 docs/               architecture and protocol contracts
 research/           external model and harness research

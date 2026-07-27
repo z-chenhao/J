@@ -7,14 +7,15 @@ import (
 	"testing"
 )
 
-func TestParseConfigRequiresExplicitProviderAndModel(t *testing.T) {
+func TestParseConfigRequiresModelAndBaseURL(t *testing.T) {
 	t.Setenv("J_AGENT_PROVIDER", "")
 	t.Setenv("J_AGENT_MODEL", "")
-	if _, err := parseConfig(nil); err == nil || !strings.Contains(err.Error(), "provider") {
+	t.Setenv("J_AGENT_BASE_URL", "")
+	if _, err := parseConfig(nil); err == nil || !strings.Contains(err.Error(), "model") {
 		t.Fatalf("error=%v", err)
 	}
-	if _, err := parseConfig([]string{"--provider", "ollama"}); err == nil ||
-		!strings.Contains(err.Error(), "model") {
+	if _, err := parseConfig([]string{"--model", "qwen3"}); err == nil ||
+		!strings.Contains(err.Error(), "base-url") {
 		t.Fatalf("error=%v", err)
 	}
 }
@@ -25,47 +26,55 @@ func TestParseConfigReturnsHelpWithoutValidation(t *testing.T) {
 	}
 }
 
-func TestParseConfigUsesTypedThinkingMode(t *testing.T) {
+func TestParseConfigUsesOpenAIProviderOptions(t *testing.T) {
 	t.Setenv("J_AGENT_PROVIDER", "")
 	t.Setenv("J_AGENT_MODEL", "")
+	t.Setenv("J_AGENT_BASE_URL", "")
 	config, err := parseConfig([]string{
-		"--provider", "ollama",
+		"--provider", "openai",
 		"--model", "qwen3",
-		"--thinking", "enabled",
+		"--base-url", "http://127.0.0.1:8000/v1",
+		"--api-key-env", "OMLX_API_KEY",
+		"--reasoning-field", "reasoning_content",
+		"--reasoning-effort", "high",
 		"hello",
 	})
 	if err != nil {
 		t.Fatalf("parseConfig() error: %v", err)
 	}
-	if config.provider != "ollama" || config.model != "qwen3" ||
-		config.thinking != "enabled" || config.reasoningEffort != "default" ||
+	if config.provider != "openai" || config.model != "qwen3" ||
+		config.apiKeyEnv != "OMLX_API_KEY" ||
+		config.reasoningField != "reasoning_content" ||
+		config.reasoningEffort != "high" ||
 		strings.Join(config.prompt, " ") != "hello" {
 		t.Fatalf("config=%#v", config)
 	}
 }
 
-func TestBuildDeepSeekModelRequiresEnvironmentCredential(t *testing.T) {
-	t.Setenv("DEEPSEEK_API_KEY", "")
-	_, err := buildModel(config{
-		provider:        "deepseek",
-		model:           "deepseek-v4-pro",
-		thinking:        "default",
+func TestBuildOpenAIProviderUsesOptionalEnvironmentCredential(t *testing.T) {
+	t.Setenv("OMLX_API_KEY", "")
+	if _, err := buildModel(config{
+		provider:        "openai",
+		model:           "Qwen3.6-35B-A3B-oQ4e-mtp",
+		baseURL:         "http://127.0.0.1:8000/v1",
+		apiKeyEnv:       "OMLX_API_KEY",
+		reasoningField:  "reasoning_content",
 		reasoningEffort: "default",
-	})
-	if err == nil || !strings.Contains(err.Error(), "API key") {
-		t.Fatalf("error=%v", err)
+	}); err != nil {
+		t.Fatalf("buildModel() error=%v", err)
 	}
 }
 
-func TestParseConfigRejectsDeepSeekOnlyEffortForOllama(t *testing.T) {
+func TestParseConfigRejectsFormerProviderNames(t *testing.T) {
 	t.Setenv("J_AGENT_PROVIDER", "")
 	t.Setenv("J_AGENT_MODEL", "")
+	t.Setenv("J_AGENT_BASE_URL", "")
 	_, err := parseConfig([]string{
 		"--provider", "ollama",
 		"--model", "qwen3",
-		"--reasoning-effort", "max",
+		"--base-url", "http://127.0.0.1:11434/v1",
 	})
-	if err == nil || !strings.Contains(err.Error(), "only by deepseek") {
+	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
 		t.Fatalf("error=%v", err)
 	}
 }
