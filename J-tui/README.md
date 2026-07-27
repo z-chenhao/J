@@ -121,6 +121,80 @@ The endpoint and model are opaque configuration. Azure mode appends
 uses the `api-key` header. It deliberately does not provide arbitrary headers,
 query parameters, or request-body configuration.
 
+## MCP and memory
+
+J-tui can compose optional J-mcp and J-mem capabilities from the same typed
+configuration. Presence enables a capability; omission disables it. The
+starter configuration does not enable either one.
+
+Add these top-level fields alongside `profiles`:
+
+```json
+{
+  "extensions": {
+    "mcp": {
+      "servers": {
+        "filesystem": {
+          "command": "npx",
+          "args": [
+            "-y",
+            "@modelcontextprotocol/server-filesystem",
+            "/Users/you/Projects"
+          ]
+        },
+        "github": {
+          "command": "github-mcp-server",
+          "args": ["stdio"],
+          "env": ["GITHUB_TOKEN"]
+        }
+      }
+    }
+  },
+  "memory": {
+    "transcript": {
+      "path": "state/transcripts.db"
+    },
+    "longTerm": {
+      "path": "state/memory.jsonl"
+    }
+  }
+}
+```
+
+`extensions.mcp` accepts explicit stdio servers. `command` is required;
+`args`, `env`, and `cwd` are optional. `env` contains environment-variable
+names rather than values. J-tui supplies `PATH`, `HOME`, and available
+operational locale/temp variables, then forwards only the additionally named
+variables. A named variable that is not set fails startup.
+
+Relative `cwd` and memory paths are resolved from the directory containing the
+configuration file. With the default `~/.j/config.json`, the example memory
+files are therefore `~/.j/state/transcripts.db` and
+`~/.j/state/memory.jsonl`.
+
+Select a transcript explicitly:
+
+```bash
+j-tui --session project-j
+```
+
+An existing session is restored before Agent construction; a missing session
+starts empty. Each successful run atomically replaces that session's SQLite
+snapshot. `J_TUI_SESSION` provides the environment equivalent. Without
+`--session`, the transcript store is not opened. Supplying a session without
+`memory.transcript` is rejected.
+
+Long-term memory is independent of transcript sessions. When configured, it
+adds `memory_retrieve`, `memory_store`, `memory_modify`, and `memory_forget` as
+ordinary model-visible Tools backed by inspectable JSONL. Retrieval remains an
+explicit Tool call; J-tui does not inject memory into prompts.
+
+All configured MCP servers initialize before the Agent starts, and their
+advertised Tools remain frozen for that process. A startup failure or a name
+collision with Bash, J-mem, or another MCP server fails explicitly. J-tui does
+not install MCP packages, sanitize tool names, retry servers, or silently omit
+failed capabilities.
+
 ## Run from the repository
 
 J-tui directly composes J-agent's OpenAI Provider. The repository's
@@ -295,12 +369,14 @@ J-tui owns:
 - terminal rendering and its private light/dark palette selection;
 - Markdown presentation and collapsed or expanded tool cards;
 - the textarea, scroll-follow policy, key bindings, and cancellation interaction;
+- typed product configuration, session selection, and module composition;
 - UI-only status reduction and the experimental JSON projection.
 
-J-tui does not own persistence, memory, model routing, plugin discovery, tool
-authorization, retry, or compaction. It composes J-agent's ordinary first-party
-Bash Tool; no J-agent runtime API was added for this implementation. The
-current event contract reports tool start and completion, not intermediate
-progress; J-tui does not invent progress that J-agent did not observe.
+J-tui does not implement persistence, memory policy, MCP, model routing,
+plugin discovery, tool authorization, retry, or compaction. It composes the
+independent J-mem and J-mcp modules plus J-agent's ordinary first-party Bash
+Tool; no J-agent runtime API was added. The current event contract reports
+tool start and completion, not intermediate progress; J-tui does not invent
+progress that J-agent did not observe.
 
 See [the repository design](../docs/design.md).

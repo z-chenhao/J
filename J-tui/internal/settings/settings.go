@@ -18,6 +18,8 @@ const maxFileSize = 1 << 20
 type File struct {
 	DefaultProfile string             `json:"defaultProfile"`
 	Profiles       map[string]Profile `json:"profiles"`
+	Extensions     *Extensions        `json:"extensions,omitempty"`
+	Memory         *Memory            `json:"memory,omitempty"`
 }
 
 // Profile describes one concrete model connection.
@@ -30,6 +32,37 @@ type Profile struct {
 	APIKeyEnv       string `json:"apiKeyEnv,omitempty"`
 	ReasoningField  string `json:"reasoningField,omitempty"`
 	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+}
+
+// Extensions contains J-tui's typed construction-time extension recipes.
+type Extensions struct {
+	MCP *MCP `json:"mcp,omitempty"`
+}
+
+// MCP describes the explicitly configured MCP servers.
+type MCP struct {
+	Servers map[string]MCPServer `json:"servers"`
+}
+
+// MCPServer describes one stdio MCP process. Env contains environment-variable
+// names, never values.
+type MCPServer struct {
+	Command string   `json:"command"`
+	Args    []string `json:"args,omitempty"`
+	Env     []string `json:"env,omitempty"`
+	CWD     string   `json:"cwd,omitempty"`
+}
+
+// Memory contains J-tui's two independently optional J-mem capabilities.
+type Memory struct {
+	Transcript *MemoryFile `json:"transcript,omitempty"`
+	LongTerm   *MemoryFile `json:"longTerm,omitempty"`
+}
+
+// MemoryFile names one local state file. Relative paths are resolved from the
+// directory containing the J-tui configuration file.
+type MemoryFile struct {
+	Path string `json:"path"`
 }
 
 // DefaultPath returns J-tui's user-scoped configuration path.
@@ -190,6 +223,79 @@ func (file File) validate() error {
 	}
 	if _, ok := file.Profiles[file.DefaultProfile]; !ok {
 		return fmt.Errorf("default profile %q is not defined", file.DefaultProfile)
+	}
+	if err := file.Extensions.validate(); err != nil {
+		return err
+	}
+	if err := file.Memory.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (extensions *Extensions) validate() error {
+	if extensions == nil {
+		return nil
+	}
+	if extensions.MCP == nil {
+		return errors.New("extensions must configure mcp")
+	}
+	if len(extensions.MCP.Servers) == 0 {
+		return errors.New("extensions.mcp must configure at least one server")
+	}
+	for name, server := range extensions.MCP.Servers {
+		if name == "" || name != strings.TrimSpace(name) {
+			return fmt.Errorf("MCP server name %q must be non-empty and trimmed", name)
+		}
+		if strings.TrimSpace(server.Command) == "" {
+			return fmt.Errorf("MCP server %q command is required", name)
+		}
+		if server.Command != strings.TrimSpace(server.Command) {
+			return fmt.Errorf("MCP server %q command must be trimmed", name)
+		}
+		if server.CWD != strings.TrimSpace(server.CWD) {
+			return fmt.Errorf("MCP server %q cwd must be trimmed", name)
+		}
+		seenEnvironment := make(map[string]struct{}, len(server.Env))
+		for _, variable := range server.Env {
+			if variable == "" || variable != strings.TrimSpace(variable) ||
+				strings.Contains(variable, "=") {
+				return fmt.Errorf(
+					"MCP server %q environment name %q must be non-empty, trimmed, and contain no '='",
+					name,
+					variable,
+				)
+			}
+			if _, exists := seenEnvironment[variable]; exists {
+				return fmt.Errorf(
+					"MCP server %q repeats environment name %q",
+					name,
+					variable,
+				)
+			}
+			seenEnvironment[variable] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func (memory *Memory) validate() error {
+	if memory == nil {
+		return nil
+	}
+	if memory.Transcript == nil && memory.LongTerm == nil {
+		return errors.New("memory must configure transcript or longTerm")
+	}
+	for name, file := range map[string]*MemoryFile{
+		"transcript": memory.Transcript,
+		"longTerm":   memory.LongTerm,
+	} {
+		if file == nil {
+			continue
+		}
+		if file.Path == "" || file.Path != strings.TrimSpace(file.Path) {
+			return fmt.Errorf("memory.%s.path must be non-empty and trimmed", name)
+		}
 	}
 	return nil
 }

@@ -211,6 +211,54 @@ func TestParseConfigSelectsNamedProfile(t *testing.T) {
 	}
 }
 
+func TestParseConfigLoadsCompositionAndSession(t *testing.T) {
+	home := isolateConfig(t)
+	path := filepath.Join(home, ".j", "config.json")
+	writeConfig(t, path, `{
+		"defaultProfile": "local",
+		"profiles": {
+			"local": {
+				"provider": "openai",
+				"model": "local-model",
+				"baseURL": "http://127.0.0.1:8000/v1"
+			}
+		},
+		"extensions": {
+			"mcp": {
+				"servers": {
+					"probe": {"command": "mcp-probe"}
+				}
+			}
+		},
+		"memory": {
+			"transcript": {"path": "state/transcripts.db"},
+			"longTerm": {"path": "state/memory.jsonl"}
+		}
+	}`)
+	cfg, err := parseConfig([]string{"--session", "project-j"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.session != "project-j" || cfg.extensions == nil ||
+		cfg.extensions.MCP.Servers["probe"].Command != "mcp-probe" ||
+		cfg.memory == nil ||
+		cfg.memory.Transcript.Path != "state/transcripts.db" {
+		t.Fatalf("config=%#v", cfg)
+	}
+}
+
+func TestParseConfigRejectsSessionWithoutTranscriptMemory(t *testing.T) {
+	isolateConfig(t)
+	_, err := parseConfig([]string{
+		"--session", "project-j",
+		"--model", "qwen",
+		"--base-url", "http://127.0.0.1:8000/v1",
+	})
+	if err == nil || !strings.Contains(err.Error(), "memory.transcript") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func TestParseConfigRequiresExplicitConfigToExist(t *testing.T) {
 	isolateConfig(t)
 	_, err := parseConfig([]string{
@@ -538,6 +586,7 @@ func isolateConfig(t *testing.T) string {
 		"J_TUI_API_KEY_ENV",
 		"J_TUI_REASONING_FIELD",
 		"J_TUI_REASONING_EFFORT",
+		"J_TUI_SESSION",
 	} {
 		t.Setenv(name, "")
 	}

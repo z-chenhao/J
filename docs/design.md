@@ -12,16 +12,16 @@ J explores one question:
 > What is the smallest truthful agent runtime that remains easy to customize?
 
 J is the umbrella repository. J-agent is its independently embeddable runtime
-kernel. J-tui and J-mem are first-party consumers used to prove that the public
-seams are sufficient for real customization.
+kernel. J-tui, J-mcp, and J-mem are first-party consumers used to prove that
+the public seams are sufficient for real customization.
 
 Current verified consumers of J-agent are its reference CLI, private JSONL
-runtime, and J-tui. One OpenAI Provider exercises the model seam through
-OpenAI-compatible and Azure OpenAI Chat Completions protocols; the backing
-servers do not count as independent `Model` implementations. J-tui consumes
-the public event and cancellation seams without a runtime API change. J-mem is
-an explicit project boundary but does not yet count as a validating
-implementation.
+runtime, J-tui, J-mcp, and J-mem. One OpenAI Provider exercises the model seam
+through OpenAI-compatible and Azure OpenAI Chat Completions protocols; the
+backing servers do not count as independent `Model` implementations. J-tui
+consumes the public event and cancellation seams, J-mcp projects MCP tools
+through `agent.Tool`, and J-mem persists `History` and supplies four ordinary
+memory Tools without a runtime API change.
 
 ## 2. Engineering constitution
 
@@ -100,15 +100,16 @@ real J consumers prove more are necessary.
 J/
 ├── J-agent/   model/tool loop and provider-neutral transcript
 ├── J-tui/     terminal presentation and interaction
+├── J-mcp/     MCP client lifecycle and Tool projection
 ├── J-mem/     local persistence and memory tools
 └── docs/      repository-level design decisions
 ```
 
 Dependency rules:
 
-- J-agent must not import J-tui, J-mem, or future J product modules.
-- J-tui and J-mem may depend on J-agent's experimental public Go API.
-- J-tui and J-mem must not own each other's policy.
+- J-agent must not import J-tui, J-mcp, J-mem, or future J product modules.
+- J-tui, J-mcp, and J-mem may depend on J-agent's experimental public Go API.
+- Sibling modules must not own each other's policy.
 - Product entrypoints compose modules; the runtime does not discover them.
 - Component-specific protocol details remain inside the owning component.
 
@@ -273,6 +274,23 @@ represented without a new J-agent API. Tool-progress events should be proposed
 only if a future real tool cannot be represented truthfully with the current
 start/completed lifecycle.
 
+### J-mcp
+
+J-mcp is an independently usable MCP-to-J-agent bridge. `DialStdio` provides
+the first concrete process recipe; `Connect` accepts the official MCP Go SDK's
+`Transport`, preserving that standard variation axis without defining a
+J-specific Transport interface.
+
+The first successful `Tools` call paginates, validates, and freezes the
+server's tools as ordinary `agent.Tool` values. Calls preserve context
+cancellation and distinguish protocol failures from MCP tool failures.
+Version 0.1 accepts text results and rejects non-text or structured-only
+results explicitly. Text output is bounded at 1 MiB.
+
+J-mcp does not construct an Agent, read J-tui configuration, render UI,
+discover packages, or define a universal Extension interface. Its stdio child
+process is a protocol boundary, not an operating-system sandbox.
+
 ### J-mem
 
 J-mem contains two deliberately separate capabilities:
@@ -282,8 +300,20 @@ J-mem contains two deliberately separate capabilities:
 2. Long-term memory uses local JSONL and exposes retrieval, storage,
    modification, and forgetting as ordinary J-agent tools.
 
-J-mem owns schema migration, indexing, retention, conflict handling, and memory
-policy. J-agent does not define a universal `Memory` or `Storage` interface.
+The implemented transcript store atomically replaces complete snapshots in a
+versioned SQLite schema. Loaded values are intended for `WithHistory`, where
+J-agent revalidates transcript invariants.
+
+The implemented long-term store is an inspectable append-only JSONL event log.
+`store`, `modify`, and `forget` operations append events; retrieval
+materializes active records and applies the initial deterministic
+case-insensitive substring policy. Its four model capabilities are
+`memory_retrieve`, `memory_store`, `memory_modify`, and `memory_forget`.
+
+J-mem owns schema migration, file formats, retrieval ordering, retention,
+conflict handling, and memory policy. Cross-process writers, embeddings,
+compaction, and ambient injection remain absent. J-agent does not define a
+universal `Memory` or `Storage` interface.
 
 Ambient retrieval or context injection should wait until the tool-based design
 proves insufficient. If required, a model wrapper should be tried before
@@ -293,9 +323,9 @@ adding a runtime Hook.
 
 The current MCP requirement does not justify a universal Extension API.
 J-agent already has the required stable mechanism: construction-time Tools.
-The first extension host therefore belongs privately to J-tui, and the planned
-J-mcp module will initialize configured MCP servers and project their tools to
-`agent.Tool` before the Agent is constructed.
+The implemented J-mcp module initializes MCP sessions and projects their tools
+to `agent.Tool` before an Agent is constructed. The implemented product
+configuration host belongs privately to J-tui and is not part of J-mcp.
 
 The experimental [J Extension Composition Protocol](extensions.md) defines
 this construction lifecycle, configuration boundary, cancellation path, and
@@ -303,9 +333,12 @@ deliberately narrow tool projection. It does not add a J-specific wire
 protocol: J-mcp speaks MCP directly. It also does not use Go runtime plugins,
 auto-discovery, runtime tool mutation, or generic configuration payloads.
 
-If another meaningfully different tool-producing module validates the same
-lifecycle, the private host may be extracted. Until then, `Extension`,
-`Plugin`, and `MCP` remain absent from J-agent.
+J-mem provides another meaningfully different Tool-producing module, plus a
+transcript lifecycle before and after Agent runs. J-tui composes those
+capabilities through a separate typed `memory` section rather than pretending
+they share MCP's connection lifecycle. That difference is evidence against
+extracting a common lifecycle prematurely. `Extension`, `Plugin`, and `MCP`
+therefore remain absent from J-agent.
 
 ## 9. Planned external modules
 
@@ -314,7 +347,7 @@ These names describe product modules, not promised J-agent interfaces:
 | Module | Initial composition strategy |
 | --- | --- |
 | J-agent-swarm | Child J-agent instances exposed to the parent as delegation tools |
-| J-mcp | J-tui construction-time module; map configured MCP tools to `agent.Tool`; own connection/auth lifecycle |
+| J-mcp | Implemented independent bridge; map MCP tools to `agent.Tool`; own connection lifecycle |
 | J-skills | Parse skill resources into prompt/tool recipes outside the runtime |
 | J-plugins | Own discovery, trust, installation, and composition |
 | J-gateway | Map platform chat identity to external Agent/session ownership |
@@ -370,16 +403,20 @@ Potential future mechanisms must be validated in this order:
 - Public APIs remain experimental before independent production consumers.
 - Extension hosting remains product-owned construction-time composition;
   J-agent does not discover or load extensions.
+- J-mcp and J-mem are independent Go modules; neither depends on J-tui.
 
 ## 12. Minimal development order
 
 1. Keep J-agent passing its protocol and race tests.
 2. Keep the text-only J-tui and JSON event trace passing against current events.
-3. Implement the private J-tui extension host and J-mcp against
-   `docs/extensions.md`.
-4. Validate one real MCP tool through J-tui without a J-agent API change.
-5. Build J-mem SQLite transcript round-trip using `History` and `WithHistory`.
-6. Add the four JSONL-backed long-term memory tools.
+3. Keep J-mcp's real stdio, cancellation, and J-agent integration tests
+   passing.
+4. Keep J-tui's typed MCP host, collision checks, environment forwarding, and
+   shutdown tests passing.
+5. Keep J-mem's SQLite transcript round-trip and four JSONL memory Tools
+   passing through J-tui's separate memory lifecycle.
+6. Validate provider-backed MCP calls as operational smoke tests without a
+   J-agent API change.
 7. Re-audit actual integration friction before changing J-agent.
 8. Prototype subagent-as-tool.
 9. Design skill/plugin distribution only after at least two resource types

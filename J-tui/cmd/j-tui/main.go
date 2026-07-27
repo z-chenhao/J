@@ -16,7 +16,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/provider/openai"
-	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
 	"github.com/z-chenhao/J/J-tui/internal/settings"
 	"github.com/z-chenhao/J/J-tui/internal/tui"
 )
@@ -34,6 +33,9 @@ type config struct {
 	apiKeyEnv       string
 	reasoningField  string
 	reasoningEffort string
+	session         string
+	extensions      *settings.Extensions
+	memory          *settings.Memory
 	prompts         []string
 }
 
@@ -46,7 +48,7 @@ func main() {
 	}
 }
 
-func run(ctx context.Context, args []string, out io.Writer) error {
+func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 	cfg, err := parseConfig(args)
 	if err != nil {
 		return err
@@ -66,13 +68,28 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	shell, err := bashtool.New(".")
+	composition, err := composeRuntime(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	runner, err := agent.New(model, agent.WithTools(shell))
+	defer func() {
+		runErr = errors.Join(runErr, composition.Close())
+	}()
+	options := []agent.Option{agent.WithTools(composition.tools...)}
+	if len(composition.history) > 0 {
+		options = append(options, agent.WithHistory(composition.history...))
+	}
+	agentRunner, err := agent.New(model, options...)
 	if err != nil {
 		return err
+	}
+	var runner conversationRunner = agentRunner
+	if composition.transcripts != nil {
+		runner = &persistentRunner{
+			runner:    agentRunner,
+			store:     composition.transcripts,
+			sessionID: cfg.session,
+		}
 	}
 
 	switch cfg.mode {
@@ -133,6 +150,12 @@ func parseConfig(args []string) (config, error) {
 		"",
 		"OpenAI-compatible reasoning effort: default, none, low, medium, high, or max",
 	)
+	flags.StringVar(
+		&values.session,
+		"session",
+		"",
+		"transcript session to restore and persist",
+	)
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -158,6 +181,9 @@ func parseConfig(args []string) (config, error) {
 	if values.initConfig {
 		if len(flags.Args()) > 0 {
 			return config{}, errors.New("--init-config does not accept a prompt")
+		}
+		if visited["session"] {
+			return config{}, errors.New("--init-config does not accept --session")
 		}
 		return config{
 			configPath: configPath,
@@ -200,6 +226,8 @@ func parseConfig(args []string) (config, error) {
 		cfg.apiKeyEnv = profile.APIKeyEnv
 		cfg.reasoningField = profile.ReasoningField
 		cfg.reasoningEffort = profile.ReasoningEffort
+		cfg.extensions = file.Extensions
+		cfg.memory = file.Memory
 		apiKeySpecified = true
 	}
 	applyEnvironment(&cfg, &apiKeySpecified)
@@ -215,6 +243,7 @@ func parseConfig(args []string) (config, error) {
 	cfg.apiKeyEnv = strings.TrimSpace(cfg.apiKeyEnv)
 	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
+	cfg.session = strings.TrimSpace(cfg.session)
 	if cfg.api == "" {
 		cfg.api = string(openai.APICompletions)
 	}
@@ -274,6 +303,12 @@ func parseConfig(args []string) (config, error) {
 	default:
 		return config{}, fmt.Errorf("unsupported reasoning effort %q", cfg.reasoningEffort)
 	}
+	if cfg.session != "" &&
+		(cfg.memory == nil || cfg.memory.Transcript == nil) {
+		return config{}, errors.New(
+			"--session requires memory.transcript in the selected configuration",
+		)
+	}
 	return cfg, nil
 }
 
@@ -294,6 +329,7 @@ func applyEnvironment(cfg *config, apiKeySpecified *bool) {
 		"J_TUI_BASE_URL":         &cfg.baseURL,
 		"J_TUI_REASONING_FIELD":  &cfg.reasoningField,
 		"J_TUI_REASONING_EFFORT": &cfg.reasoningEffort,
+		"J_TUI_SESSION":          &cfg.session,
 	} {
 		if value := env(name); value != "" {
 			*target = value
@@ -323,6 +359,7 @@ func applyFlags(
 		"base-url":         {&cfg.baseURL, values.baseURL},
 		"reasoning-field":  {&cfg.reasoningField, values.reasoningField},
 		"reasoning-effort": {&cfg.reasoningEffort, values.reasoningEffort},
+		"session":          {&cfg.session, values.session},
 	} {
 		if visited[name] {
 			*pair.target = pair.value
@@ -363,7 +400,7 @@ func parseReasoningField(value string) openai.ReasoningField {
 	return openai.ReasoningField(value)
 }
 
-func runJSON(ctx context.Context, runner *agent.Agent, prompts []string, out io.Writer) error {
+func runJSON(ctx context.Context, runner conversationRunner, prompts []string, out io.Writer) error {
 	encoder := json.NewEncoder(out)
 	for _, prompt := range prompts {
 		var encodeErr error

@@ -1,7 +1,7 @@
 # J Extension Composition Protocol 0.1
 
-Status: experimental design; the configuration shown here is not implemented
-yet.
+Status: experimental and implemented by J-mcp plus J-tui's private
+construction-time host.
 
 ## Decision summary
 
@@ -10,10 +10,10 @@ plugins. A product host such as J-tui may load a configured module, obtain
 ordinary `agent.Tool` values from it, and pass those tools to `agent.New`.
 J-agent remains unaware of extensions and MCP.
 
-Version 0.1 is scoped to one capability: adding tools through the planned
-J-mcp module. It does not define a universal Extension Go interface or another
-wire protocol. J-mcp speaks MCP directly and privately maps the discovered
-tools to J-agent's existing `Tool` seam.
+Version 0.1 is scoped to one capability: adding tools through J-mcp. It does
+not define a universal Extension Go interface or another wire protocol. J-mcp
+speaks MCP directly and privately maps discovered tools to J-agent's existing
+`Tool` seam.
 
 ## Concrete requirement and consumers
 
@@ -25,10 +25,13 @@ The current requirement is:
 - cancellation, errors, tool identity, and JSON schemas remain truthful;
 - no MCP lifecycle enters J-agent.
 
-The first intended host is J-tui. The first planned extension module is J-mcp.
-Neither counts as a validated implementation until the integration exists. The
-reference `j-agent` process and hypothetical third-party extensions are not
-current consumers and do not justify a shared host package yet.
+The first configuration host is J-tui. J-mcp is independently validated
+through in-memory protocol tests, a real stdio child process, cancellation
+tests, and a complete J-agent tool loop. J-tui validates typed configuration,
+process environment forwarding, cross-module tool collision handling, and
+shutdown. The reference `j-agent` process and hypothetical third-party
+extensions are not configuration consumers and do not justify a shared host
+package.
 
 ## Evidence
 
@@ -97,6 +100,11 @@ J-mcp owns:
 - MCP cancellation and timeout handling;
 - conversion between MCP tool results and J-agent text tool results.
 
+J-mcp's `DialStdio` is the initial process recipe. Its experimental `Connect`
+accepts the official Go SDK's `mcp.Transport`, so applications with another
+standard transport can compose it without J defining a duplicate Transport
+interface. J-tui's first configuration remains stdio-only.
+
 ## Composition lifecycle
 
 The version 0.1 lifecycle is deliberately construction-only:
@@ -131,13 +139,13 @@ add, remove, or replace tools during a conversation. MCP
 This preserves J-agent's transcript and tool invariants and avoids runtime
 mutation.
 
-## Planned J-tui configuration
+## J-tui configuration
 
-J-tui will remain the owner of `~/.j/config.json`. Presence of the typed `mcp`
+J-tui remains the owner of `~/.j/config.json`. Presence of the typed `mcp`
 extension enables it; absence disables it. There is no redundant `enabled`
 flag.
 
-The first implementation should accept only explicit stdio servers:
+The first implementation accepts only explicit stdio servers:
 
 ```json
 {
@@ -155,7 +163,8 @@ The first implementation should accept only explicit stdio servers:
         "filesystem": {
           "command": "mcp-server-filesystem",
           "args": ["/workspace"],
-          "env": ["FILESYSTEM_TOKEN"]
+          "env": ["FILESYSTEM_TOKEN"],
+          "cwd": "servers/filesystem"
         }
       }
     }
@@ -165,21 +174,24 @@ The first implementation should accept only explicit stdio servers:
 
 Rules:
 
-- `command` is required; `args` and `env` are optional.
+- `command` is required; `args`, `env`, and `cwd` are optional.
 - `env` contains environment-variable names, never secret values.
 - the host supplies a documented minimal process environment and forwards only
   the additionally named variables.
+- relative `cwd` is resolved from the configuration file's directory.
 - unknown extension kinds and fields are rejected.
 - a configured server that cannot initialize fails startup explicitly.
 - no project-local auto-discovery or implicit command execution occurs.
-- Streamable HTTP waits for a real integration that needs it.
+- J-tui Streamable HTTP configuration waits for a real integration that needs
+  it; independent Go consumers may supply an official SDK transport directly.
 
-The exact schema becomes executable only with the J-mcp implementation. Until
-then, current J-tui correctly rejects the unimplemented `extensions` field.
+The schema is executable. J-tui sorts server IDs for deterministic startup,
+freezes their Tools, rejects collisions across Bash, J-mem, and every MCP
+server, and closes initialized connections in reverse order.
 
 ## Tool projection
 
-J-mcp will project each accepted MCP tool to one `agent.Tool`:
+J-mcp projects each accepted MCP tool to one `agent.Tool`:
 
 | MCP | J-agent |
 | --- | --- |
@@ -191,14 +203,16 @@ J-mcp will project each accepted MCP tool to one `agent.Tool`:
 | `isError: true` | model-visible Tool error |
 | request cancellation | `context.Context` cancellation |
 
-Version 0.1 supports text result blocks. Image, audio, embedded-resource, and
-structured-only results return an explicit unsupported-result error rather
-than being silently dropped or represented with an untyped container.
+Version 0.1 supports text result blocks up to 1 MiB. Image, audio,
+embedded-resource, structured-only, and oversized results return an explicit
+unsupported-result error rather than being silently dropped, truncated, or
+represented with an untyped container.
 
-Configured server IDs and exposed tool names must already satisfy the model
-providers' common tool-name constraints. J-mcp rejects invalid or duplicate
-names instead of applying lossy sanitization. Namespacing and exact limits must
-be fixed by executable provider tests during implementation.
+J-mcp rejects blank or untrimmed names, non-object input schemas, and duplicate
+names returned by one server instead of applying lossy sanitization.
+Provider-specific tool-name constraints are not generalized into J-mcp; the
+product host may validate them for its selected model provider. Namespacing and
+duplicate names across servers are likewise host composition concerns.
 
 ## Failure and cancellation
 
@@ -292,18 +306,29 @@ capability part of the kernel.
 
 ## Validation required
 
-The J-mcp implementation must prove:
+Current validation:
 
-1. one configured stdio MCP server initializes and exposes frozen J-agent
-   Tools;
-2. J-tui can call one MCP tool through a real model;
-3. duplicate and invalid tool names fail before Agent construction;
-4. cancellation reaches the MCP request and child process;
-5. protocol and tool execution errors remain distinguishable in tests;
-6. omitted MCP configuration starts no process and exposes no MCP tools;
-7. credentials do not enter logs, events, transcripts, or configuration
-   values;
-8. normal, race, and end-to-end tests pass.
+1. one stdio MCP server initializes and exposes frozen J-agent Tools;
+2. one projected MCP tool completes a real J-agent tool-call continuation;
+3. invalid names and schemas fail before Agent construction;
+4. context cancellation reaches an active MCP request;
+5. protocol and tool execution errors remain distinguishable;
+6. non-text and oversized results fail explicitly;
+7. normal, race, vet, and build checks pass.
+
+J-tui integration additionally proves:
+
+1. a configured stdio server's Tool is callable through J-tui's composed
+   runner;
+2. duplicate names across built-in, memory, and MCP tools fail before Agent
+   construction;
+3. omitted MCP configuration starts no process and exposes no MCP tools;
+4. only named environment values are forwarded beyond the documented baseline;
+5. transcript snapshots restore through `WithHistory`, and successful runs
+   persist the next complete snapshot.
+
+A provider-backed live MCP call remains an operational smoke test rather than
+a deterministic unit test.
 
 Only after a second meaningfully different tool-producing module needs the same
 host lifecycle should J extract a shared package or public Go interface.

@@ -9,10 +9,12 @@ The repository currently contains:
 | --- | --- | --- |
 | [`J-agent`](J-agent/) | Minimal Go model/tool runtime | Implemented, experimental |
 | [`J-tui`](J-tui/) | Minimal terminal interface and JSON event trace | Implemented, experimental |
-| [`J-mem`](J-mem/) | Local short- and long-term memory for J-agent | Boundary defined |
+| [`J-mcp`](J-mcp/) | MCP server tools projected into J-agent | Implemented, experimental |
+| [`J-mem`](J-mem/) | SQLite transcripts and JSONL long-term memory | Implemented, experimental |
 
-J-agent remains independently embeddable. J-tui and J-mem are first-party
-examples of customization, not privileged runtime layers.
+J-agent remains independently embeddable. J-tui, J-mcp, and J-mem are
+first-party examples of customization, not privileged runtime layers. Each can
+be replaced or omitted by an embedding application.
 
 ## Install J-tui
 
@@ -41,6 +43,11 @@ profiles but no credentials. Export the selected profile's API-key environment
 variable, then use `j-tui --profile <name>` to switch profiles. See the
 [J-tui guide](J-tui/) for the complete configuration and security boundary.
 
+The same typed file can explicitly configure stdio MCP servers and optional
+J-mem state. `j-tui --session <id>` restores and persists a configured
+transcript, while long-term memory remains four ordinary model-visible Tools.
+Omitting either configuration keeps that module disabled.
+
 J-tui enables the first-party Bash Tool. A direct host installation therefore
 runs model-requested commands with the permissions of the `j-tui` process. Use
 the repository container when the workspace requires isolation.
@@ -58,13 +65,13 @@ them, for example [`J-agent/docs`](J-agent/docs/).
 
 ## Build
 
-Run all currently implemented checks from the repository root:
+Run checks for all four modules from the repository root:
 
 ```bash
 make check
 ```
 
-Build the reference agent and terminal binaries:
+Build the reference binaries and validate the library modules:
 
 ```bash
 make build
