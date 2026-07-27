@@ -17,10 +17,14 @@ import (
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/provider/openai"
 	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
+	"github.com/z-chenhao/J/J-tui/internal/settings"
 	"github.com/z-chenhao/J/J-tui/internal/tui"
 )
 
 type config struct {
+	configPath      string
+	profile         string
+	initConfig      bool
 	mode            string
 	provider        string
 	model           string
@@ -43,6 +47,17 @@ func main() {
 func run(ctx context.Context, args []string, out io.Writer) error {
 	cfg, err := parseConfig(args)
 	if err != nil {
+		return err
+	}
+	if cfg.initConfig {
+		if err := settings.WriteDefault(cfg.configPath); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(
+			out,
+			"Created %s\nEdit the profiles if needed, then run j-tui.\n",
+			cfg.configPath,
+		)
 		return err
 	}
 	model, err := buildModel(cfg)
@@ -83,32 +98,102 @@ func run(ctx context.Context, args []string, out io.Writer) error {
 func parseConfig(args []string) (config, error) {
 	flags := flag.NewFlagSet("j-tui", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	var cfg config
-	flags.StringVar(&cfg.mode, "mode", "tui", "output mode: tui or json")
-	flags.StringVar(&cfg.provider, "provider", env("J_TUI_PROVIDER"), "model provider: openai")
-	flags.StringVar(&cfg.model, "model", env("J_TUI_MODEL"), "provider model name")
-	flags.StringVar(&cfg.baseURL, "base-url", env("J_TUI_BASE_URL"), "provider API base URL")
+	var values config
+	flags.StringVar(&values.configPath, "config", "", "configuration file path")
+	flags.StringVar(&values.profile, "profile", "", "named model profile")
+	flags.BoolVar(&values.initConfig, "init-config", false, "create a starter configuration and exit")
+	flags.StringVar(&values.mode, "mode", "tui", "output mode: tui or json")
+	flags.StringVar(&values.provider, "provider", "", "model provider: openai")
+	flags.StringVar(&values.model, "model", "", "provider model name")
+	flags.StringVar(&values.baseURL, "base-url", "", "provider API base URL")
 	flags.StringVar(
-		&cfg.apiKeyEnv,
+		&values.apiKeyEnv,
 		"api-key-env",
-		env("J_TUI_API_KEY_ENV"),
+		"",
 		"environment variable containing the provider API key",
 	)
 	flags.StringVar(
-		&cfg.reasoningField,
+		&values.reasoningField,
 		"reasoning-field",
-		env("J_TUI_REASONING_FIELD"),
+		"",
 		"assistant reasoning history field: omit, reasoning_content, or reasoning",
 	)
 	flags.StringVar(
-		&cfg.reasoningEffort,
+		&values.reasoningEffort,
 		"reasoning-effort",
-		env("J_TUI_REASONING_EFFORT"),
+		"",
 		"OpenAI-compatible reasoning effort: default, none, low, medium, high, or max",
 	)
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
+	visited := make(map[string]bool)
+	flags.Visit(func(value *flag.Flag) {
+		visited[value.Name] = true
+	})
+
+	defaultPath, err := settings.DefaultPath()
+	if err != nil {
+		return config{}, err
+	}
+	configPath := env("J_TUI_CONFIG")
+	if configPath == "" {
+		configPath = defaultPath
+	}
+	if visited["config"] {
+		configPath = strings.TrimSpace(values.configPath)
+		if configPath == "" {
+			return config{}, errors.New("--config requires a non-empty path")
+		}
+	}
+	if values.initConfig {
+		if len(flags.Args()) > 0 {
+			return config{}, errors.New("--init-config does not accept a prompt")
+		}
+		return config{
+			configPath: configPath,
+			initConfig: true,
+			mode:       "tui",
+		}, nil
+	}
+
+	cfg := config{
+		configPath:      configPath,
+		mode:            "tui",
+		provider:        "openai",
+		reasoningField:  "omit",
+		reasoningEffort: "default",
+	}
+	profileName := env("J_TUI_PROFILE")
+	if visited["profile"] {
+		profileName = strings.TrimSpace(values.profile)
+	}
+	file, fileLoaded, err := loadSettings(configPath)
+	if err != nil {
+		explicitConfig := visited["config"] || env("J_TUI_CONFIG") != ""
+		if !errors.Is(err, os.ErrNotExist) || explicitConfig || profileName != "" {
+			return config{}, err
+		}
+	}
+	apiKeySpecified := false
+	if fileLoaded {
+		resolvedName, profile, err := file.Resolve(profileName)
+		if err != nil {
+			return config{}, fmt.Errorf("resolve J-tui config %q: %w", configPath, err)
+		}
+		cfg.profile = resolvedName
+		cfg.provider = profile.Provider
+		cfg.model = profile.Model
+		cfg.baseURL = profile.BaseURL
+		cfg.apiKeyEnv = profile.APIKeyEnv
+		cfg.reasoningField = profile.ReasoningField
+		cfg.reasoningEffort = profile.ReasoningEffort
+		apiKeySpecified = true
+	}
+	applyEnvironment(&cfg, &apiKeySpecified)
+	applyFlags(&cfg, values, visited, &apiKeySpecified)
+	cfg.prompts = flags.Args()
+
 	cfg.mode = strings.ToLower(strings.TrimSpace(cfg.mode))
 	cfg.provider = strings.ToLower(strings.TrimSpace(cfg.provider))
 	cfg.model = strings.TrimSpace(cfg.model)
@@ -116,10 +201,7 @@ func parseConfig(args []string) (config, error) {
 	cfg.apiKeyEnv = strings.TrimSpace(cfg.apiKeyEnv)
 	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
-	if cfg.provider == "" {
-		cfg.provider = "openai"
-	}
-	if cfg.apiKeyEnv == "" {
+	if !apiKeySpecified {
 		cfg.apiKeyEnv = "OPENAI_API_KEY"
 	}
 	if cfg.reasoningField == "" {
@@ -128,13 +210,15 @@ func parseConfig(args []string) (config, error) {
 	if cfg.reasoningEffort == "" {
 		cfg.reasoningEffort = "default"
 	}
-	cfg.prompts = flags.Args()
-
 	if cfg.model == "" {
-		return config{}, errors.New("--model or J_TUI_MODEL is required")
+		return config{}, errors.New(
+			"model is required; select a configured profile, set --model/J_TUI_MODEL, or run --init-config",
+		)
 	}
 	if cfg.baseURL == "" {
-		return config{}, errors.New("--base-url or J_TUI_BASE_URL is required")
+		return config{}, errors.New(
+			"base URL is required; select a configured profile, set --base-url/J_TUI_BASE_URL, or run --init-config",
+		)
 	}
 	if cfg.mode != "tui" && cfg.mode != "json" {
 		return config{}, fmt.Errorf("unsupported mode %q", cfg.mode)
@@ -156,6 +240,59 @@ func parseConfig(args []string) (config, error) {
 		return config{}, fmt.Errorf("unsupported reasoning effort %q", cfg.reasoningEffort)
 	}
 	return cfg, nil
+}
+
+func loadSettings(path string) (settings.File, bool, error) {
+	file, err := settings.Load(path)
+	if err != nil {
+		return settings.File{}, false, err
+	}
+	return file, true, nil
+}
+
+func applyEnvironment(cfg *config, apiKeySpecified *bool) {
+	for name, target := range map[string]*string{
+		"J_TUI_PROVIDER":         &cfg.provider,
+		"J_TUI_MODEL":            &cfg.model,
+		"J_TUI_BASE_URL":         &cfg.baseURL,
+		"J_TUI_REASONING_FIELD":  &cfg.reasoningField,
+		"J_TUI_REASONING_EFFORT": &cfg.reasoningEffort,
+	} {
+		if value := env(name); value != "" {
+			*target = value
+		}
+	}
+	if value := env("J_TUI_API_KEY_ENV"); value != "" {
+		cfg.apiKeyEnv = value
+		*apiKeySpecified = true
+	}
+}
+
+func applyFlags(
+	cfg *config,
+	values config,
+	visited map[string]bool,
+	apiKeySpecified *bool,
+) {
+	for name, pair := range map[string]struct {
+		target *string
+		value  string
+	}{
+		"mode":             {&cfg.mode, values.mode},
+		"provider":         {&cfg.provider, values.provider},
+		"model":            {&cfg.model, values.model},
+		"base-url":         {&cfg.baseURL, values.baseURL},
+		"reasoning-field":  {&cfg.reasoningField, values.reasoningField},
+		"reasoning-effort": {&cfg.reasoningEffort, values.reasoningEffort},
+	} {
+		if visited[name] {
+			*pair.target = pair.value
+		}
+	}
+	if visited["api-key-env"] {
+		cfg.apiKeyEnv = values.apiKeyEnv
+		*apiKeySpecified = true
+	}
 }
 
 func buildModel(cfg config) (agent.Model, error) {

@@ -6,13 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/z-chenhao/J/J-agent/agent"
 )
 
 func TestParseConfigJSON(t *testing.T) {
+	isolateConfig(t)
 	t.Setenv("J_TUI_MODEL", "")
 	t.Setenv("J_TUI_BASE_URL", "")
 	cfg, err := parseConfig([]string{
@@ -34,6 +38,7 @@ func TestParseConfigJSON(t *testing.T) {
 }
 
 func TestParseConfigAcceptsDeepSeekThroughOpenAIProvider(t *testing.T) {
+	isolateConfig(t)
 	t.Setenv("J_TUI_MODEL", "")
 	t.Setenv("J_TUI_BASE_URL", "")
 	cfg, err := parseConfig([]string{
@@ -54,6 +59,7 @@ func TestParseConfigAcceptsDeepSeekThroughOpenAIProvider(t *testing.T) {
 }
 
 func TestParseConfigAcceptsOMLXThroughOpenAIProvider(t *testing.T) {
+	isolateConfig(t)
 	t.Setenv("J_TUI_MODEL", "")
 	t.Setenv("J_TUI_BASE_URL", "")
 	cfg, err := parseConfig([]string{
@@ -72,6 +78,7 @@ func TestParseConfigAcceptsOMLXThroughOpenAIProvider(t *testing.T) {
 }
 
 func TestParseConfigRejectsFormerProviderNames(t *testing.T) {
+	isolateConfig(t)
 	t.Setenv("J_TUI_MODEL", "")
 	t.Setenv("J_TUI_BASE_URL", "")
 	_, err := parseConfig([]string{
@@ -85,6 +92,7 @@ func TestParseConfigRejectsFormerProviderNames(t *testing.T) {
 }
 
 func TestParseConfigRejectsMissingJSONPrompt(t *testing.T) {
+	isolateConfig(t)
 	t.Setenv("J_TUI_MODEL", "")
 	t.Setenv("J_TUI_BASE_URL", "")
 	_, err := parseConfig([]string{
@@ -94,6 +102,107 @@ func TestParseConfigRejectsMissingJSONPrompt(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+func TestParseConfigLoadsProfileAndAppliesPrecedence(t *testing.T) {
+	home := isolateConfig(t)
+	path := filepath.Join(home, ".j", "config.json")
+	writeConfig(t, path, `{
+		"defaultProfile": "local",
+		"profiles": {
+			"local": {
+				"provider": "openai",
+				"model": "profile-model",
+				"baseURL": "http://profile.example/v1",
+				"apiKeyEnv": "PROFILE_API_KEY",
+				"reasoningField": "reasoning_content"
+			}
+		}
+	}`)
+	t.Setenv("J_TUI_MODEL", "environment-model")
+	cfg, err := parseConfig([]string{"--model", "flag-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.profile != "local" || cfg.model != "flag-model" ||
+		cfg.baseURL != "http://profile.example/v1" ||
+		cfg.apiKeyEnv != "PROFILE_API_KEY" {
+		t.Fatalf("config=%#v", cfg)
+	}
+}
+
+func TestParseConfigSelectsNamedProfile(t *testing.T) {
+	home := isolateConfig(t)
+	path := filepath.Join(home, ".j", "config.json")
+	writeConfig(t, path, `{
+		"defaultProfile": "local",
+		"profiles": {
+			"local": {
+				"provider": "openai",
+				"model": "local-model",
+				"baseURL": "http://127.0.0.1:8000/v1"
+			},
+			"remote": {
+				"provider": "openai",
+				"model": "remote-model",
+				"baseURL": "https://example.com/v1",
+				"apiKeyEnv": "REMOTE_API_KEY"
+			}
+		}
+	}`)
+	cfg, err := parseConfig([]string{"--profile", "remote"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.profile != "remote" || cfg.model != "remote-model" ||
+		cfg.apiKeyEnv != "REMOTE_API_KEY" {
+		t.Fatalf("config=%#v", cfg)
+	}
+	local, err := parseConfig([]string{"--profile", "local"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.apiKeyEnv != "" {
+		t.Fatalf("local API key environment=%q", local.apiKeyEnv)
+	}
+}
+
+func TestParseConfigRequiresExplicitConfigToExist(t *testing.T) {
+	isolateConfig(t)
+	_, err := parseConfig([]string{
+		"--config", filepath.Join(t.TempDir(), "missing.json"),
+		"--model", "qwen",
+		"--base-url", "http://127.0.0.1:8000/v1",
+	})
+	if err == nil || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestRunInitializesConfig(t *testing.T) {
+	isolateConfig(t)
+	path := filepath.Join(t.TempDir(), ".j", "config.json")
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{
+		"--init-config",
+		"--config", path,
+	}, &output); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"defaultProfile": "omlx"`) ||
+		!strings.Contains(output.String(), path) {
+		t.Fatalf("config=%s output=%q", data, output.String())
+	}
+	if err := run(context.Background(), []string{
+		"--init-config",
+		"--config", path,
+	}, &output); err == nil {
+		t.Fatal("existing config was overwritten")
 	}
 }
 
@@ -321,4 +430,33 @@ func (model *recordingModel) Complete(
 			CachedInputTokens: &cached,
 		},
 	}, nil
+}
+
+func isolateConfig(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, name := range []string{
+		"J_TUI_CONFIG",
+		"J_TUI_PROFILE",
+		"J_TUI_PROVIDER",
+		"J_TUI_MODEL",
+		"J_TUI_BASE_URL",
+		"J_TUI_API_KEY_ENV",
+		"J_TUI_REASONING_FIELD",
+		"J_TUI_REASONING_EFFORT",
+	} {
+		t.Setenv(name, "")
+	}
+	return home
+}
+
+func writeConfig(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

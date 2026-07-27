@@ -4,7 +4,99 @@ J-tui is a minimal terminal consumer of J-agent. It keeps one conversation,
 renders the runtime event stream, and leaves model/tool execution and
 transcript invariants in J-agent.
 
-## Run
+## Install
+
+### Go toolchain
+
+With Go 1.26 or newer:
+
+```bash
+go install github.com/z-chenhao/J/J-tui/cmd/j-tui@latest
+```
+
+Ensure the Go binary directory, normally `~/go/bin`, is on `PATH`.
+
+### Prebuilt binary
+
+Versioned releases provide checked archives for macOS and Linux on amd64 and
+arm64:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/z-chenhao/J/main/J-tui/install.sh | sh
+```
+
+The installer:
+
+- downloads only from this repository's latest GitHub Release;
+- selects the current operating system and architecture;
+- verifies the archive against the published SHA-256 checksums;
+- installs to `~/.local/bin` without requiring root.
+
+Set `J_TUI_INSTALL_DIR` to select another directory.
+
+## First run
+
+Create the starter configuration:
+
+```bash
+j-tui --init-config
+```
+
+This creates `~/.j/config.json` with permissions `0600` and refuses to
+overwrite an existing file. It contains connection recipes, not API keys:
+
+```json
+{
+  "defaultProfile": "omlx",
+  "profiles": {
+    "omlx": {
+      "provider": "openai",
+      "model": "Qwen3.6-35B-A3B-oQ4e-mtp",
+      "baseURL": "http://127.0.0.1:8000/v1",
+      "apiKeyEnv": "OMLX_API_KEY",
+      "reasoningField": "reasoning_content"
+    },
+    "deepseek": {
+      "provider": "openai",
+      "model": "deepseek-chat",
+      "baseURL": "https://api.deepseek.com",
+      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "reasoningField": "reasoning_content"
+    },
+    "ollama": {
+      "provider": "openai",
+      "model": "qwen3",
+      "baseURL": "http://127.0.0.1:11434/v1",
+      "reasoningField": "reasoning"
+    }
+  }
+}
+```
+
+Start the default profile or select another:
+
+```bash
+j-tui
+j-tui --profile deepseek
+j-tui --profile ollama
+```
+
+Export `OMLX_API_KEY` or `DEEPSEEK_API_KEY` when the selected service requires
+it. J-tui reads only the named environment variable; credentials are not stored
+in the configuration file.
+
+Use `--config <path>` or `J_TUI_CONFIG` to select another file. Configuration
+precedence is:
+
+```text
+command-line flag > J_TUI_* environment variable > selected profile > default
+```
+
+The default file is user-scoped. J-tui does not search parent directories,
+merge project settings, mutate the file during a conversation, or expose the
+configuration schema through J-agent.
+
+## Run from the repository
 
 J-tui directly composes J-agent's OpenAI-compatible provider. The repository's
 local development recipe selects the oMLX model
@@ -26,8 +118,8 @@ go run ./cmd/j-tui \
   --reasoning-field reasoning_content
 ```
 
-Set `OMLX_API_KEY` when the local server requires authentication. DeepSeek
-uses the same provider with its own endpoint and credential environment:
+DeepSeek uses the same provider with its own endpoint and credential
+environment:
 
 ```bash
 go run ./cmd/j-tui \

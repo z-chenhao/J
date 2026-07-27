@@ -14,6 +14,37 @@ The repository currently contains:
 J-agent remains independently embeddable. J-tui and J-mem are first-party
 examples of customization, not privileged runtime layers.
 
+## Install J-tui
+
+With Go 1.26 or newer:
+
+```bash
+go install github.com/z-chenhao/J/J-tui/cmd/j-tui@latest
+j-tui --init-config
+j-tui
+```
+
+Versioned releases also publish checked archives for macOS and Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/z-chenhao/J/main/J-tui/install.sh | sh
+
+j-tui --init-config
+j-tui
+```
+
+The installer places the binary in `~/.local/bin` by default. Set
+`J_TUI_INSTALL_DIR` to choose another directory.
+
+`--init-config` creates `~/.j/config.json` with oMLX, DeepSeek, and Ollama
+profiles but no credentials. Export the selected profile's API-key environment
+variable, then use `j-tui --profile <name>` to switch profiles. See the
+[J-tui guide](J-tui/) for the complete configuration and security boundary.
+
+J-tui enables the first-party Bash Tool. A direct host installation therefore
+runs model-requested commands with the permissions of the `j-tui` process. Use
+the repository container when the workspace requires isolation.
+
 ## Design
 
 The repository's architecture, Pi research conclusions, public-boundary

@@ -65,6 +65,12 @@ JSON Lines diagnostic stream. J-tui adopts only that narrow mechanism:
 protocol compatibility. Pi's queue, compaction, retry, extension, and session
 events remain product policy outside J-agent.
 
+Pi also separates global/project settings, custom model definitions, and
+stored authentication. J-tui adopts only the currently proven subset: one
+user-scoped file of named model connections whose credentials remain in
+environment variables. Project merging, credential storage, and an interactive
+settings editor would add policy without a current consumer and are deferred.
+
 Primary sources:
 
 - [Pi agent core](https://github.com/badlogic/pi-mono/tree/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/agent)
@@ -74,6 +80,8 @@ Primary sources:
 - [Pi SDK and ResourceLoader](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/docs/sdk.md)
 - [Pi package format](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/docs/packages.md)
 - [Pi JSON event stream mode](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/docs/json.md)
+- [Pi settings](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/settings.md)
+- [Pi custom models](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/models.md)
 - [Pi subagent example](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/examples/extensions/subagent/index.ts)
 
 The conclusion is not that J should copy Pi's entire mutable state or
@@ -223,6 +231,15 @@ It owns rendering, key bindings, terminal state, input editing, and UI-specific
 metadata. J-agent must not gain labels, colors, widgets, or TUI component types
 to serve J-tui.
 
+J-tui also owns its user-scoped `~/.j/config.json`, named model profiles, and
+binary distribution. The file contains model connection policy and names an
+environment variable for credentials; it does not store API keys. Command-line
+flags override environment variables, which override the selected profile.
+This is an experimental J-tui contract, not a J-agent configuration API.
+Project-local configuration merging, runtime profile mutation, credential
+storage, provider discovery, and a general settings framework remain
+deliberately absent.
+
 The first implementation uses existing start/delta/completed events. Its
 private reducer maps them to `thinking`, `responding`, `tool`, `completed`,
 `failed`, and `canceled` display states. Reasoning content is retained by the
@@ -312,6 +329,8 @@ Potential future mechanisms must be validated in this order:
 - J-agent remains a separate Go module under `J/J-agent`.
 - The OpenAI-compatible provider is real integration code; backend profiles and
   demo models are not product features.
+- J-tui owns its experimental profile file and release artifacts; J-agent does
+  not read product configuration or install packages.
 - J-Space research informs model/Harness choices but is not a runtime
   integration or README identity.
 - Reasoning content is preserved when provider continuation requires it.

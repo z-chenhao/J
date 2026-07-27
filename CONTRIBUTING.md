@@ -43,3 +43,10 @@ Keep pull requests narrow. Describe:
 - rejected broader alternatives
 
 Public APIs remain experimental until a release explicitly marks them stable.
+
+## J-tui releases
+
+Tags matching `J-tui/v<version>` build standalone macOS and Linux archives for
+amd64 and arm64, publish SHA-256 checksums, and create a GitHub Release. Before
+tagging, J-tui's `go.mod` must reference a published J-agent revision and
+`GOWORK=off go test ./...` must pass inside `J-tui`.
