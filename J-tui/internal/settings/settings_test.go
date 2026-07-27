@@ -18,6 +18,7 @@ func TestLoadAndResolve(t *testing.T) {
 				"apiVersion": "2024-02-01",
 				"model": "qwen",
 				"baseURL": "http://127.0.0.1:8000/v1",
+				"apiKey": "${LOCAL_API_KEY}",
 				"reasoningField": "reasoning_content"
 			}
 		}
@@ -32,6 +33,7 @@ func TestLoadAndResolve(t *testing.T) {
 	}
 	if name != "local" || profile.API != "azure-openai-completions" ||
 		profile.APIVersion != "2024-02-01" || profile.Model != "qwen" ||
+		profile.APIKey != "${LOCAL_API_KEY}" ||
 		profile.ReasoningField != "reasoning_content" {
 		t.Fatalf("name=%q profile=%#v", name, profile)
 	}
@@ -96,7 +98,10 @@ func TestLoadStreamableHTTPMCPConfiguration(t *testing.T) {
 		"extensions":{"mcp":{"servers":{
 			"search":{
 				"url":"https://mcp.example.test/mcp/",
-				"bearerTokenEnv":"SEARCH_MCP_TOKEN",
+				"headers":{
+					"Authorization":"Bearer ${SEARCH_MCP_TOKEN}",
+					"X-Tenant":"tenant-a"
+				},
 				"tools":["search"]
 			}
 		}}}
@@ -107,7 +112,8 @@ func TestLoadStreamableHTTPMCPConfiguration(t *testing.T) {
 	}
 	server := file.Extensions.MCP.Servers["search"]
 	if server.URL != "https://mcp.example.test/mcp/" ||
-		server.BearerTokenEnv != "SEARCH_MCP_TOKEN" ||
+		server.Headers["Authorization"] != "Bearer ${SEARCH_MCP_TOKEN}" ||
+		server.Headers["X-Tenant"] != "tenant-a" ||
 		len(server.Tools) != 1 {
 		t.Fatalf("server=%#v", server)
 	}
@@ -143,6 +149,15 @@ func TestLoadValidatesProfiles(t *testing.T) {
 
 func TestLoadRejectsInvalidMCPAndMemoryConfiguration(t *testing.T) {
 	tests := map[string]string{
+		"former profile API key field": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1","apiKeyEnv":"TOKEN"}}
+		}`,
+		"former MCP bearer field": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"url":"https://mcp.example/mcp","bearerTokenEnv":"TOKEN"}}}}
+		}`,
 		"empty extensions": `{
 			"defaultProfile":"local",
 			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
@@ -183,10 +198,25 @@ func TestLoadRejectsInvalidMCPAndMemoryConfiguration(t *testing.T) {
 			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
 			"extensions":{"mcp":{"servers":{"x":{"command":"server","url":"https://mcp.example/mcp"}}}}
 		}`,
-		"stdio bearer token": `{
+		"stdio headers": `{
 			"defaultProfile":"local",
 			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
-			"extensions":{"mcp":{"servers":{"x":{"command":"server","bearerTokenEnv":"TOKEN"}}}}
+			"extensions":{"mcp":{"servers":{"x":{"command":"server","headers":{"Authorization":"secret"}}}}}
+		}`,
+		"empty HTTP headers": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"url":"https://mcp.example/mcp","headers":{}}}}}
+		}`,
+		"protocol-owned HTTP header": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"url":"https://mcp.example/mcp","headers":{"Mcp-Session-Id":"bad"}}}}}
+		}`,
+		"malformed HTTP header value": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"extensions":{"mcp":{"servers":{"x":{"url":"https://mcp.example/mcp","headers":{"Authorization":"Bearer ${TOKEN"}}}}}
 		}`,
 		"HTTP process settings": `{
 			"defaultProfile":"local",
@@ -220,6 +250,54 @@ func TestLoadRejectsInvalidMCPAndMemoryConfiguration(t *testing.T) {
 	}
 }
 
+func TestResolveValue(t *testing.T) {
+	lookup := func(name string) (string, bool) {
+		values := map[string]string{
+			"TOKEN":  "secret",
+			"TENANT": "team-a",
+		}
+		value, exists := values[name]
+		return value, exists
+	}
+	for name, test := range map[string]struct {
+		value string
+		want  string
+	}{
+		"literal":              {"literal-key", "literal-key"},
+		"one reference":        {"${TOKEN}", "secret"},
+		"mixed references":     {"Bearer ${TOKEN}:${TENANT}", "Bearer secret:team-a"},
+		"dollar without brace": {"$TOKEN", "$TOKEN"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := ResolveValue(test.value, lookup)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("ResolveValue(%q)=%q, want %q", test.value, got, test.want)
+			}
+		})
+	}
+}
+
+func TestResolveValueRejectsInvalidReferences(t *testing.T) {
+	for name, value := range map[string]string{
+		"missing":      "${MISSING}",
+		"unterminated": "Bearer ${TOKEN",
+		"empty":        "${}",
+		"shell syntax": "${TOKEN:-fallback}",
+		"command":      "${!command}",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := ResolveValue(value, func(string) (string, bool) {
+				return "", false
+			}); err == nil {
+				t.Fatal("invalid reference was accepted")
+			}
+		})
+	}
+}
+
 func TestWriteDefaultCreatesPrivateConfigWithoutOverwrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), ".j", "config.json")
 	if err := WriteDefault(path); err != nil {
@@ -237,7 +315,8 @@ func TestWriteDefaultCreatesPrivateConfigWithoutOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	if file.DefaultProfile != "omlx" || len(file.Profiles) != 3 ||
-		file.Profiles["omlx"].API != "openai-completions" {
+		file.Profiles["omlx"].API != "openai-completions" ||
+		file.Profiles["omlx"].APIKey != "${OMLX_API_KEY}" {
 		t.Fatalf("file=%#v", file)
 	}
 	if err := WriteDefault(path); err == nil || !strings.Contains(err.Error(), "already exists") {

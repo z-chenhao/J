@@ -4,16 +4,16 @@ ENTRY := ./cmd/j-tui
 PROVIDER ?= openai
 MODEL ?= Qwen3.6-35B-A3B-oQ4e-mtp
 BASE_URL ?= http://127.0.0.1:8000/v1
-API_KEY_ENV ?= OMLX_API_KEY
+API_KEY ?= $${OMLX_API_KEY}
 REASONING_FIELD ?= reasoning_content
 
 .PHONY: run trace build install test race fmt-check vet install-script-check clean check
 
 run:
-	go run $(ENTRY) --provider $(PROVIDER) --model $(MODEL) --base-url $(BASE_URL) --api-key-env $(API_KEY_ENV) --reasoning-field $(REASONING_FIELD)
+	go run $(ENTRY) --provider $(PROVIDER) --model $(MODEL) --base-url $(BASE_URL) --api-key '$(API_KEY)' --reasoning-field $(REASONING_FIELD)
 
 trace:
-	go run $(ENTRY) --mode json --provider $(PROVIDER) --model $(MODEL) --base-url $(BASE_URL) --api-key-env $(API_KEY_ENV) --reasoning-field $(REASONING_FIELD) "Use the bash tool to run pwd, then report the output."
+	go run $(ENTRY) --mode json --provider $(PROVIDER) --model $(MODEL) --base-url $(BASE_URL) --api-key '$(API_KEY)' --reasoning-field $(REASONING_FIELD) "Use the bash tool to run pwd, then report the output."
 
 build:
 	mkdir -p $(BIN_DIR)

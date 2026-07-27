@@ -43,7 +43,8 @@ j-tui --init-config
 ```
 
 This creates `~/.j/config.json` with permissions `0600` and refuses to
-overwrite an existing file. It contains connection recipes, not API keys:
+overwrite an existing file. The starter uses environment references rather
+than embedding API keys:
 
 ```json
 {
@@ -54,7 +55,7 @@ overwrite an existing file. It contains connection recipes, not API keys:
       "api": "openai-completions",
       "model": "Qwen3.6-35B-A3B-oQ4e-mtp",
       "baseURL": "http://127.0.0.1:8000/v1",
-      "apiKeyEnv": "OMLX_API_KEY",
+      "apiKey": "${OMLX_API_KEY}",
       "reasoningField": "reasoning_content"
     },
     "deepseek": {
@@ -62,7 +63,7 @@ overwrite an existing file. It contains connection recipes, not API keys:
       "api": "openai-completions",
       "model": "deepseek-chat",
       "baseURL": "https://api.deepseek.com",
-      "apiKeyEnv": "DEEPSEEK_API_KEY",
+      "apiKey": "${DEEPSEEK_API_KEY}",
       "reasoningField": "reasoning_content"
     },
     "ollama": {
@@ -85,8 +86,15 @@ j-tui --profile ollama
 ```
 
 Export `OMLX_API_KEY` or `DEEPSEEK_API_KEY` when the selected service requires
-it. J-tui reads only the named environment variable; credentials are not stored
-in the configuration file.
+it. `apiKey` is an ordinary string and may contain one or more `${ENV_VAR}`
+references. A literal key is also accepted, so the configuration is not bound
+to environment variables; environment references are the recommended default
+because configuration files are commonly copied or shared.
+
+The value resolver deliberately supports only literal text and `${ENV_VAR}`.
+It does not execute commands, implement shell expansion, or search an external
+credential store. A missing referenced variable fails when that profile is
+used.
 
 Use `--config <path>` or `J_TUI_CONFIG` to select another file. Configuration
 precedence is:
@@ -112,7 +120,7 @@ An Azure OpenAI Chat Completions profile is:
   "apiVersion": "2024-02-01",
   "model": "gpt-5.5-2026-04-24",
   "baseURL": "https://example.internal/modelhub",
-  "apiKeyEnv": "GPT_5_5_API_KEY"
+  "apiKey": "${GPT_5_5_API_KEY}"
 }
 ```
 
@@ -154,7 +162,9 @@ Add these top-level fields alongside `profiles`:
         },
         "tavily": {
           "url": "https://mcp.tavily.com/mcp/",
-          "bearerTokenEnv": "TAVILY_API_KEY",
+          "headers": {
+            "Authorization": "Bearer ${TAVILY_API_KEY}"
+          },
           "tools": ["tavily_search"]
         }
       }
@@ -174,13 +184,21 @@ Add these top-level fields alongside `profiles`:
 Each `extensions.mcp` server configures exactly one transport:
 
 - a stdio process uses `command` and optional `args`, `env`, and `cwd`;
-- a Streamable HTTP endpoint uses `url` and optional `bearerTokenEnv`.
+- a Streamable HTTP endpoint uses `url` and optional `headers`.
 
-`env` and `bearerTokenEnv` contain environment-variable names rather than
-values. J-tui supplies stdio servers with `PATH`, `HOME`, and available
-operational locale/temp variables, then forwards only the additionally named
-variables. For HTTP, J-tui sends the named value as a Bearer token. A named
-variable that is not set fails startup. Do not put API keys in an HTTP URL.
+`env` remains an allowlist of parent environment-variable names for stdio
+servers. J-tui supplies `PATH`, `HOME`, and available operational locale/temp
+variables, then forwards only the additionally named variables. HTTP header
+values use the same literal plus `${ENV_VAR}` value syntax as `apiKey`; this
+supports Bearer, Basic, and vendor-defined authentication without adding an
+authentication taxonomy. Missing references fail startup. Do not put API keys
+in an HTTP URL.
+
+J-tui rejects malformed header names and values, plus headers owned by HTTP or
+MCP framing such as `Content-Type`, `Accept`, and `Mcp-*`. It does not implement
+OAuth refresh, command-based secret lookup, or arbitrary transport tuning.
+Endpoints with configured headers must be final URLs: redirects are rejected
+so credentials cannot be replayed to another origin.
 
 Direct Streamable HTTP avoids a Node/npm proxy process for a remote MCP server.
 For example, the Tavily configuration above replaces an `npx -y mcp-remote …`
@@ -256,7 +274,7 @@ go run ./cmd/j-tui \
   --api openai-completions \
   --model Qwen3.6-35B-A3B-oQ4e-mtp \
   --base-url http://127.0.0.1:8000/v1 \
-  --api-key-env OMLX_API_KEY \
+  --api-key '${OMLX_API_KEY}' \
   --reasoning-field reasoning_content
 ```
 
@@ -269,7 +287,7 @@ go run ./cmd/j-tui \
   --api openai-completions \
   --model deepseek-v4-flash \
   --base-url https://api.deepseek.com \
-  --api-key-env DEEPSEEK_API_KEY \
+  --api-key '${DEEPSEEK_API_KEY}' \
   --reasoning-field reasoning_content
 ```
 
@@ -366,7 +384,7 @@ go run ./cmd/j-tui \
   --provider openai \
   --model Qwen3.6-35B-A3B-oQ4e-mtp \
   --base-url http://127.0.0.1:8000/v1 \
-  --api-key-env OMLX_API_KEY \
+  --api-key '${OMLX_API_KEY}' \
   --reasoning-field reasoning_content \
   "Use bash to run pwd, then report the output."
 ```

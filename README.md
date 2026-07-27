@@ -108,7 +108,7 @@ docker run --rm -it \
   --provider openai \
   --model deepseek-v4-flash \
   --base-url https://api.deepseek.com \
-  --api-key-env DEEPSEEK_API_KEY \
+  --api-key '${DEEPSEEK_API_KEY}' \
   --reasoning-field reasoning_content
 ```
 

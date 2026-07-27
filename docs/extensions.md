@@ -170,7 +170,9 @@ endpoints:
         },
         "search": {
           "url": "https://mcp.example.test/mcp/",
-          "bearerTokenEnv": "SEARCH_MCP_TOKEN"
+          "headers": {
+            "Authorization": "Bearer ${SEARCH_MCP_TOKEN}"
+          }
         }
       }
     }
@@ -182,10 +184,11 @@ Rules:
 
 - exactly one of `command` or `url` is required.
 - stdio accepts optional `args`, `env`, and `cwd`; HTTP does not.
-- HTTP accepts optional `bearerTokenEnv` and sends that value through the
-  standard Authorization Bearer header.
-- `env` and `bearerTokenEnv` contain environment-variable names, never secret
-  values.
+- HTTP accepts optional string `headers`. Header values may combine literal
+  text with `${ENV_VAR}` references.
+- configured HTTP headers do not follow redirects.
+- `env` remains a stdio environment-name allowlist; it is independent from
+  HTTP header value resolution.
 - omitted `tools` selects every advertised tool; a non-empty array is an exact,
   case-sensitive allowlist.
 - an empty allowlist or a name not advertised by that server fails explicitly.
@@ -196,8 +199,8 @@ Rules:
 - a configured server that cannot initialize fails startup explicitly.
 - no project-local auto-discovery or implicit command execution occurs.
 - the Tavily remote MCP integration is the concrete consumer that justifies
-  Streamable HTTP; arbitrary headers, OAuth policy, and transport tuning remain
-  absent.
+  Streamable HTTP and configured headers; HTTP/MCP framing headers, OAuth
+  policy, command-based secret lookup, and transport tuning remain absent.
 
 The schema is executable. J-tui sorts server IDs for deterministic startup,
 discovers each server's complete tool set through J-mcp, applies its private

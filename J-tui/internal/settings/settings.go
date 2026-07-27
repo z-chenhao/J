@@ -30,7 +30,7 @@ type Profile struct {
 	APIVersion      string `json:"apiVersion,omitempty"`
 	Model           string `json:"model"`
 	BaseURL         string `json:"baseURL"`
-	APIKeyEnv       string `json:"apiKeyEnv,omitempty"`
+	APIKey          string `json:"apiKey,omitempty"`
 	ReasoningField  string `json:"reasoningField,omitempty"`
 	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 }
@@ -46,16 +46,15 @@ type MCP struct {
 }
 
 // MCPServer describes either one stdio MCP process or one Streamable HTTP
-// endpoint. Env and BearerTokenEnv contain environment-variable names, never
-// values.
+// endpoint.
 type MCPServer struct {
-	Command        string   `json:"command,omitempty"`
-	Args           []string `json:"args,omitempty"`
-	Env            []string `json:"env,omitempty"`
-	CWD            string   `json:"cwd,omitempty"`
-	URL            string   `json:"url,omitempty"`
-	BearerTokenEnv string   `json:"bearerTokenEnv,omitempty"`
-	Tools          []string `json:"tools,omitempty"`
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Env     []string          `json:"env,omitempty"`
+	CWD     string            `json:"cwd,omitempty"`
+	URL     string            `json:"url,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	Tools   []string          `json:"tools,omitempty"`
 }
 
 // Memory contains J-tui's two independently optional J-mem capabilities.
@@ -125,7 +124,7 @@ func WriteDefault(path string) error {
 				API:            "openai-completions",
 				Model:          "Qwen3.6-35B-A3B-oQ4e-mtp",
 				BaseURL:        "http://127.0.0.1:8000/v1",
-				APIKeyEnv:      "OMLX_API_KEY",
+				APIKey:         "${OMLX_API_KEY}",
 				ReasoningField: "reasoning_content",
 			},
 			"deepseek": {
@@ -133,7 +132,7 @@ func WriteDefault(path string) error {
 				API:            "openai-completions",
 				Model:          "deepseek-chat",
 				BaseURL:        "https://api.deepseek.com",
-				APIKeyEnv:      "DEEPSEEK_API_KEY",
+				APIKey:         "${DEEPSEEK_API_KEY}",
 				ReasoningField: "reasoning_content",
 			},
 			"ollama": {
@@ -225,6 +224,9 @@ func (file File) validate() error {
 		if strings.TrimSpace(profile.BaseURL) == "" {
 			return fmt.Errorf("profile %q baseURL is required", name)
 		}
+		if err := ValidateValue(profile.APIKey); err != nil {
+			return fmt.Errorf("profile %q apiKey: %w", name, err)
+		}
 	}
 	if _, ok := file.Profiles[file.DefaultProfile]; !ok {
 		return fmt.Errorf("default profile %q is not defined", file.DefaultProfile)
@@ -285,15 +287,39 @@ func (extensions *Extensions) validate() error {
 					name,
 				)
 			}
-		} else if server.BearerTokenEnv != "" {
+		} else if server.Headers != nil {
 			return fmt.Errorf(
-				"MCP server %q bearerTokenEnv requires url transport",
+				"MCP server %q headers require url transport",
 				name,
 			)
 		}
-		if server.BearerTokenEnv != "" {
-			if err := validateEnvironmentName(server.BearerTokenEnv); err != nil {
-				return fmt.Errorf("MCP server %q bearerTokenEnv: %w", name, err)
+		if server.Headers != nil {
+			if len(server.Headers) == 0 {
+				return fmt.Errorf(
+					"MCP server %q headers must be omitted or contain at least one header",
+					name,
+				)
+			}
+			seenHeaders := make(map[string]struct{}, len(server.Headers))
+			for header, value := range server.Headers {
+				if !validHTTPHeaderName(header) {
+					return fmt.Errorf("MCP server %q header name %q is invalid", name, header)
+				}
+				normalized := strings.ToLower(header)
+				if _, exists := seenHeaders[normalized]; exists {
+					return fmt.Errorf("MCP server %q repeats header name %q", name, header)
+				}
+				seenHeaders[normalized] = struct{}{}
+				if protocolOwnedHTTPHeader(normalized) {
+					return fmt.Errorf(
+						"MCP server %q header %q is owned by the HTTP or MCP protocol",
+						name,
+						header,
+					)
+				}
+				if err := ValidateValue(value); err != nil {
+					return fmt.Errorf("MCP server %q header %q: %w", name, header, err)
+				}
 			}
 		}
 		seenEnvironment := make(map[string]struct{}, len(server.Env))
@@ -332,6 +358,106 @@ func (extensions *Extensions) validate() error {
 		}
 	}
 	return nil
+}
+
+// ValidateValue checks the deliberately small configuration value syntax.
+// Literal text is preserved and ${NAME} references are resolved only when the
+// value is used.
+func ValidateValue(value string) error {
+	_, err := ResolveValue(value, func(string) (string, bool) {
+		return "", true
+	})
+	return err
+}
+
+// ResolveValue substitutes ${NAME} references using lookup. It does not
+// implement shell expansion, command execution, default values, or $NAME.
+func ResolveValue(
+	value string,
+	lookup func(string) (string, bool),
+) (string, error) {
+	if lookup == nil {
+		return "", errors.New("value lookup is required")
+	}
+	var resolved strings.Builder
+	for cursor := 0; cursor < len(value); {
+		offset := strings.Index(value[cursor:], "${")
+		if offset < 0 {
+			resolved.WriteString(value[cursor:])
+			break
+		}
+		start := cursor + offset
+		resolved.WriteString(value[cursor:start])
+		endOffset := strings.IndexByte(value[start+2:], '}')
+		if endOffset < 0 {
+			return "", errors.New("contains an unterminated ${...} reference")
+		}
+		end := start + 2 + endOffset
+		name := value[start+2 : end]
+		if !validEnvironmentReference(name) {
+			return "", errors.New(
+				"environment reference names must match [A-Za-z_][A-Za-z0-9_]*",
+			)
+		}
+		replacement, exists := lookup(name)
+		if !exists {
+			return "", fmt.Errorf("environment variable %s is not set", name)
+		}
+		resolved.WriteString(replacement)
+		cursor = end + 1
+	}
+	return resolved.String(), nil
+}
+
+func validEnvironmentReference(name string) bool {
+	if name == "" || !isASCIILetter(name[0]) && name[0] != '_' {
+		return false
+	}
+	for index := 1; index < len(name); index++ {
+		character := name[index]
+		if !isASCIILetter(character) &&
+			(character < '0' || character > '9') &&
+			character != '_' {
+			return false
+		}
+	}
+	return true
+}
+
+func isASCIILetter(character byte) bool {
+	return character >= 'a' && character <= 'z' ||
+		character >= 'A' && character <= 'Z'
+}
+
+func validHTTPHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for index := 0; index < len(name); index++ {
+		character := name[index]
+		if isASCIILetter(character) ||
+			character >= '0' && character <= '9' ||
+			strings.ContainsRune("!#$%&'*+-.^_`|~", rune(character)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func protocolOwnedHTTPHeader(normalized string) bool {
+	switch normalized {
+	case "host",
+		"connection",
+		"content-length",
+		"transfer-encoding",
+		"content-type",
+		"accept",
+		"last-event-id":
+		return true
+	default:
+		return strings.HasPrefix(normalized, "mcp-")
+	}
 }
 
 func validateEnvironmentName(name string) error {

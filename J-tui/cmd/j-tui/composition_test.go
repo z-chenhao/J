@@ -9,7 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/z-chenhao/J/J-agent/agent"
@@ -184,7 +186,7 @@ func TestComposeRuntimeRejectsUnknownConfiguredMCPTool(t *testing.T) {
 	}
 }
 
-func TestComposeRuntimeLoadsStreamableHTTPMCPWithBearerToken(t *testing.T) {
+func TestComposeRuntimeLoadsStreamableHTTPMCPWithConfiguredHeaders(t *testing.T) {
 	t.Setenv("REMOTE_MCP_TOKEN", "test-token")
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{
 		Name:    "j-tui-http-mcp-test",
@@ -208,6 +210,10 @@ func TestComposeRuntimeLoadsStreamableHTTPMCPWithBearerToken(t *testing.T) {
 				http.Error(writer, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			if request.Header.Get("X-J-Tenant") != "team-a" {
+				http.Error(writer, "missing tenant", http.StatusBadRequest)
+				return
+			}
 			mcpHandler.ServeHTTP(writer, request)
 		},
 	))
@@ -218,9 +224,12 @@ func TestComposeRuntimeLoadsStreamableHTTPMCPWithBearerToken(t *testing.T) {
 		extensions: &settings.Extensions{MCP: &settings.MCP{
 			Servers: map[string]settings.MCPServer{
 				"remote": {
-					URL:            httpServer.URL,
-					BearerTokenEnv: "REMOTE_MCP_TOKEN",
-					Tools:          []string{"remote_probe"},
+					URL: httpServer.URL,
+					Headers: map[string]string{
+						"Authorization": "Bearer ${REMOTE_MCP_TOKEN}",
+						"X-J-Tenant":    "team-a",
+					},
+					Tools: []string{"remote_probe"},
 				},
 			},
 		}},
@@ -248,15 +257,57 @@ func TestComposeRuntimeLoadsStreamableHTTPMCPWithBearerToken(t *testing.T) {
 	}
 }
 
-func TestComposeRuntimeRequiresConfiguredHTTPBearerToken(t *testing.T) {
+func TestComposeRuntimeRequiresConfiguredHTTPHeaderReference(t *testing.T) {
 	if err := os.Unsetenv("MISSING_REMOTE_MCP_TOKEN"); err != nil {
 		t.Fatal(err)
 	}
 	_, err := connectMCPServer(context.Background(), "", settings.MCPServer{
-		URL:            "https://mcp.example.test/mcp",
-		BearerTokenEnv: "MISSING_REMOTE_MCP_TOKEN",
+		URL: "https://mcp.example.test/mcp",
+		Headers: map[string]string{
+			"Authorization": "Bearer ${MISSING_REMOTE_MCP_TOKEN}",
+		},
 	})
 	if err == nil || !strings.Contains(err.Error(), "MISSING_REMOTE_MCP_TOKEN") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestConfiguredHTTPHeadersAreNotForwardedAcrossRedirects(t *testing.T) {
+	var targetRequests atomic.Int64
+	target := httptest.NewServer(http.HandlerFunc(
+		func(http.ResponseWriter, *http.Request) {
+			targetRequests.Add(1)
+		},
+	))
+	defer target.Close()
+	redirect := httptest.NewServer(http.HandlerFunc(
+		func(writer http.ResponseWriter, request *http.Request) {
+			http.Redirect(writer, request, target.URL, http.StatusTemporaryRedirect)
+		},
+	))
+	defer redirect.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err := connectMCPServer(ctx, "", settings.MCPServer{
+		URL: redirect.URL,
+		Headers: map[string]string{
+			"Authorization": "Bearer literal-secret",
+		},
+	})
+	if err == nil {
+		t.Fatal("redirecting MCP endpoint was accepted")
+	}
+	if targetRequests.Load() != 0 {
+		t.Fatal("configured HTTP headers followed a redirect")
+	}
+}
+
+func TestResolveHTTPHeadersRejectsControlCharacters(t *testing.T) {
+	_, err := resolveHTTPHeaders(map[string]string{
+		"Authorization": "Bearer good\r\nX-Injected: bad",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid value") {
 		t.Fatalf("error=%v", err)
 	}
 }

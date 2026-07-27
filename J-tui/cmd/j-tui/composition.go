@@ -146,18 +146,20 @@ func connectMCPServer(
 	}
 
 	var client *http.Client
-	if server.BearerTokenEnv != "" {
-		token, exists := os.LookupEnv(server.BearerTokenEnv)
-		if !exists || strings.TrimSpace(token) == "" {
-			return nil, fmt.Errorf(
-				"bearer token environment variable %s is not set",
-				server.BearerTokenEnv,
-			)
+	if len(server.Headers) > 0 {
+		headers, err := resolveHTTPHeaders(server.Headers)
+		if err != nil {
+			return nil, err
 		}
-		client = &http.Client{Transport: bearerTransport{
-			base:  http.DefaultTransport,
-			token: token,
-		}}
+		client = &http.Client{
+			Transport: headerTransport{
+				base:    http.DefaultTransport,
+				headers: headers,
+			},
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	return jmcp.Connect(ctx, &mcpsdk.StreamableClientTransport{
 		Endpoint:             server.URL,
@@ -167,14 +169,42 @@ func connectMCPServer(
 	})
 }
 
-type bearerTransport struct {
-	base  http.RoundTripper
-	token string
+func resolveHTTPHeaders(configured map[string]string) (http.Header, error) {
+	headers := make(http.Header, len(configured))
+	for name, value := range configured {
+		resolved, err := settings.ResolveValue(value, os.LookupEnv)
+		if err != nil {
+			return nil, fmt.Errorf("resolve HTTP header %q: %w", name, err)
+		}
+		if !validHTTPHeaderValue(resolved) {
+			return nil, fmt.Errorf("HTTP header %q contains an invalid value", name)
+		}
+		headers.Set(name, resolved)
+	}
+	return headers, nil
 }
 
-func (transport bearerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+func validHTTPHeaderValue(value string) bool {
+	for index := 0; index < len(value); index++ {
+		character := value[index]
+		if character == '\t' || character >= ' ' && character != '\u007f' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+type headerTransport struct {
+	base    http.RoundTripper
+	headers http.Header
+}
+
+func (transport headerTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	copy := request.Clone(request.Context())
-	copy.Header.Set("Authorization", "Bearer "+transport.token)
+	for name, values := range transport.headers {
+		copy.Header[name] = append([]string(nil), values...)
+	}
 	return transport.base.RoundTrip(copy)
 }
 

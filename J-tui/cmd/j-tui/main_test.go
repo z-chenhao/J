@@ -53,7 +53,7 @@ func TestParseConfigAcceptsAzureOpenAICompletionsProfile(t *testing.T) {
 				"apiVersion": "2024-02-01",
 				"model": "gpt-5.5-2026-04-24",
 				"baseURL": "https://example.invalid/modelhub",
-				"apiKeyEnv": "GPT_5_5_API_KEY"
+				"apiKey": "${GPT_5_5_API_KEY}"
 			}
 		}
 	}`)
@@ -64,7 +64,7 @@ func TestParseConfigAcceptsAzureOpenAICompletionsProfile(t *testing.T) {
 	if cfg.provider != "openai" || cfg.api != "azure-openai-completions" ||
 		cfg.apiVersion != "2024-02-01" ||
 		cfg.model != "gpt-5.5-2026-04-24" ||
-		cfg.apiKeyEnv != "GPT_5_5_API_KEY" {
+		cfg.apiKey != "${GPT_5_5_API_KEY}" {
 		t.Fatalf("config=%#v", cfg)
 	}
 }
@@ -89,14 +89,14 @@ func TestParseConfigAcceptsDeepSeekThroughOpenAIProvider(t *testing.T) {
 		"--provider", "openai",
 		"--model", "deepseek-v4-flash",
 		"--base-url", "https://api.deepseek.com",
-		"--api-key-env", "DEEPSEEK_API_KEY",
+		"--api-key", "${DEEPSEEK_API_KEY}",
 		"--reasoning-field", "reasoning_content",
 		"--reasoning-effort", "high",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.provider != "openai" || cfg.apiKeyEnv != "DEEPSEEK_API_KEY" ||
+	if cfg.provider != "openai" || cfg.apiKey != "${DEEPSEEK_API_KEY}" ||
 		cfg.reasoningField != "reasoning_content" || cfg.reasoningEffort != "high" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
@@ -110,7 +110,7 @@ func TestParseConfigAcceptsOMLXThroughOpenAIProvider(t *testing.T) {
 		"--provider", "openai",
 		"--model", "Qwen3.6-35B-A3B-oQ4e-mtp",
 		"--base-url", "http://127.0.0.1:8000/v1",
-		"--api-key-env", "OMLX_API_KEY",
+		"--api-key", "${OMLX_API_KEY}",
 		"--reasoning-field", "reasoning_content",
 	})
 	if err != nil {
@@ -159,19 +159,23 @@ func TestParseConfigLoadsProfileAndAppliesPrecedence(t *testing.T) {
 				"provider": "openai",
 				"model": "profile-model",
 				"baseURL": "http://profile.example/v1",
-				"apiKeyEnv": "PROFILE_API_KEY",
+				"apiKey": "${PROFILE_API_KEY}",
 				"reasoningField": "reasoning_content"
 			}
 		}
 	}`)
 	t.Setenv("J_TUI_MODEL", "environment-model")
-	cfg, err := parseConfig([]string{"--model", "flag-model"})
+	t.Setenv("J_TUI_API_KEY", "environment-key")
+	cfg, err := parseConfig([]string{
+		"--model", "flag-model",
+		"--api-key", "flag-key",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.profile != "local" || cfg.model != "flag-model" ||
 		cfg.baseURL != "http://profile.example/v1" ||
-		cfg.apiKeyEnv != "PROFILE_API_KEY" {
+		cfg.apiKey != "flag-key" {
 		t.Fatalf("config=%#v", cfg)
 	}
 }
@@ -191,7 +195,7 @@ func TestParseConfigSelectsNamedProfile(t *testing.T) {
 				"provider": "openai",
 				"model": "remote-model",
 				"baseURL": "https://example.com/v1",
-				"apiKeyEnv": "REMOTE_API_KEY"
+				"apiKey": "${REMOTE_API_KEY}"
 			}
 		}
 	}`)
@@ -200,15 +204,15 @@ func TestParseConfigSelectsNamedProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.profile != "remote" || cfg.model != "remote-model" ||
-		cfg.apiKeyEnv != "REMOTE_API_KEY" {
+		cfg.apiKey != "${REMOTE_API_KEY}" {
 		t.Fatalf("config=%#v", cfg)
 	}
 	local, err := parseConfig([]string{"--profile", "local"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if local.apiKeyEnv != "" {
-		t.Fatalf("local API key environment=%q", local.apiKeyEnv)
+	if local.apiKey != "" {
+		t.Fatalf("local API key=%q", local.apiKey)
 	}
 }
 
@@ -460,7 +464,7 @@ func TestRunJSONTracksAzureOpenAICompletionsEvents(t *testing.T) {
 		"--api-version", "2024-02-01",
 		"--model", "gpt-5.5-2026-04-24",
 		"--base-url", server.URL + "/gateway",
-		"--api-key-env", "GPT_5_5_API_KEY",
+		"--api-key", "${GPT_5_5_API_KEY}",
 		"1+1",
 	}, &output)
 	if err != nil {
@@ -717,7 +721,9 @@ func isolateConfig(t *testing.T) string {
 		"J_TUI_API_VERSION",
 		"J_TUI_MODEL",
 		"J_TUI_BASE_URL",
-		"J_TUI_API_KEY_ENV",
+		"J_TUI_API_KEY",
+		"OPENAI_API_KEY",
+		"AZURE_OPENAI_API_KEY",
 		"J_TUI_REASONING_FIELD",
 		"J_TUI_REASONING_EFFORT",
 		"J_TUI_SESSION",

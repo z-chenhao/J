@@ -70,11 +70,13 @@ Pi also separates provider identity, wire API, model metadata, settings scope,
 and stored authentication. Its custom model configuration can select an API
 such as `openai-completions` independently from the provider name. J-tui adopts
 only the currently proven subset: one user-scoped file of named model
-connections, an explicit API protocol, and credentials that remain in
-environment variables. Project merging, credential storage, arbitrary headers,
-command-based secret resolution, model catalogs, compatibility bags, and an
-interactive settings editor would add policy without a current consumer and
-are deferred.
+connections, an explicit API protocol, and string values that may reference
+environment variables through `${ENV_VAR}`. Literal credentials remain
+possible because the connection schema must not require one secret source, but
+the starter file recommends environment references. Project merging, a
+credential store, command-based secret resolution, model catalogs,
+compatibility bags, and an interactive settings editor would add policy
+without a current consumer and are deferred.
 
 Primary sources:
 
@@ -242,12 +244,13 @@ to serve J-tui.
 
 J-tui also owns its user-scoped `~/.j/config.json`, named model profiles, and
 binary distribution. The file separates the `openai` Provider implementation
-from its selected `api` wire protocol and names an environment variable for
-credentials; it does not store API keys. Command-line flags override
+from its selected `api` wire protocol. Its `apiKey` is a string value with
+optional `${ENV_VAR}` references, so environment variables are a recommended
+source rather than a schema requirement. Command-line flags override
 environment variables, which override the selected profile. This is an
 experimental J-tui contract, not a J-agent configuration API.
 Project-local configuration merging, runtime profile mutation, credential
-storage, provider discovery, and a general settings framework remain
+store integration, provider discovery, and a general settings framework remain
 deliberately absent.
 
 When transcript persistence is configured, J-tui creates a fresh named session
@@ -262,10 +265,13 @@ Session identity and the SQLite snapshot recipe remain J-tui/J-mem policy over
 The Tavily integration also proved a second MCP transport recipe. Launching the
 remote server through `npx mcp-remote` made package startup dominate J-tui
 launch, while the remote endpoint itself spoke Streamable HTTP. J-tui now
-constructs the official SDK transport directly and supports one optional Bearer
-token environment variable. Arbitrary headers, OAuth policy, cached tool
-schemas, background daemons, and a J-specific transport interface remain
-unjustified.
+constructs the official SDK transport directly. Tavily authentication and
+vendor endpoints proved that the stable input is a small map of HTTP header
+strings, not a Bearer-token policy. Header values share the private
+literal-plus-`${ENV_VAR}` resolver used by model profiles, while protocol-owned
+HTTP/MCP headers remain closed. OAuth policy, command-based secret lookup,
+cached tool schemas, background daemons, and a J-specific transport interface
+remain unjustified.
 
 The first implementation uses existing start/delta/completed events. Its
 private reducer maps them to `thinking`, `responding`, `tool`, `completed`,

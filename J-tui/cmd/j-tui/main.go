@@ -35,7 +35,7 @@ type config struct {
 	apiVersion      string
 	model           string
 	baseURL         string
-	apiKeyEnv       string
+	apiKey          string
 	reasoningField  string
 	reasoningEffort string
 	session         string
@@ -158,10 +158,10 @@ func parseConfig(args []string) (config, error) {
 	flags.StringVar(&values.model, "model", "", "provider model name")
 	flags.StringVar(&values.baseURL, "base-url", "", "provider API base URL")
 	flags.StringVar(
-		&values.apiKeyEnv,
-		"api-key-env",
+		&values.apiKey,
+		"api-key",
 		"",
-		"environment variable containing the provider API key",
+		"provider API key value; supports ${ENV_VAR} references",
 	)
 	flags.StringVar(
 		&values.reasoningField,
@@ -262,7 +262,7 @@ func parseConfig(args []string) (config, error) {
 		cfg.apiVersion = profile.APIVersion
 		cfg.model = profile.Model
 		cfg.baseURL = profile.BaseURL
-		cfg.apiKeyEnv = profile.APIKeyEnv
+		cfg.apiKey = profile.APIKey
 		cfg.reasoningField = profile.ReasoningField
 		cfg.reasoningEffort = profile.ReasoningEffort
 		cfg.extensions = file.Extensions
@@ -279,7 +279,6 @@ func parseConfig(args []string) (config, error) {
 	cfg.apiVersion = strings.TrimSpace(cfg.apiVersion)
 	cfg.model = strings.TrimSpace(cfg.model)
 	cfg.baseURL = strings.TrimSpace(cfg.baseURL)
-	cfg.apiKeyEnv = strings.TrimSpace(cfg.apiKeyEnv)
 	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
 	cfg.session = strings.TrimSpace(cfg.session)
@@ -305,11 +304,19 @@ func parseConfig(args []string) (config, error) {
 		cfg.api = string(openai.APICompletions)
 	}
 	if !apiKeySpecified {
+		var conventional string
 		if cfg.api == string(openai.APIAzureCompletions) {
-			cfg.apiKeyEnv = "AZURE_OPENAI_API_KEY"
+			conventional = "AZURE_OPENAI_API_KEY"
 		} else {
-			cfg.apiKeyEnv = "OPENAI_API_KEY"
+			conventional = "OPENAI_API_KEY"
 		}
+		if value, exists := os.LookupEnv(conventional); exists &&
+			strings.TrimSpace(value) != "" {
+			cfg.apiKey = "${" + conventional + "}"
+		}
+	}
+	if err := settings.ValidateValue(cfg.apiKey); err != nil {
+		return config{}, fmt.Errorf("provider API key: %w", err)
 	}
 	if cfg.reasoningField == "" {
 		cfg.reasoningField = "omit"
@@ -450,8 +457,8 @@ func applyEnvironment(cfg *config, apiKeySpecified *bool) {
 			*target = value
 		}
 	}
-	if value := env("J_TUI_API_KEY_ENV"); value != "" {
-		cfg.apiKeyEnv = value
+	if value, exists := os.LookupEnv("J_TUI_API_KEY"); exists && value != "" {
+		cfg.apiKey = value
 		*apiKeySpecified = true
 	}
 }
@@ -480,8 +487,8 @@ func applyFlags(
 			*pair.target = pair.value
 		}
 	}
-	if visited["api-key-env"] {
-		cfg.apiKeyEnv = values.apiKeyEnv
+	if visited["api-key"] {
+		cfg.apiKey = values.apiKey
 		*apiKeySpecified = true
 	}
 }
@@ -490,8 +497,12 @@ func buildModel(cfg config) (agent.Model, error) {
 	if cfg.provider != "openai" {
 		return nil, fmt.Errorf("unsupported provider %q", cfg.provider)
 	}
+	apiKey, err := settings.ResolveValue(cfg.apiKey, os.LookupEnv)
+	if err != nil {
+		return nil, fmt.Errorf("resolve provider API key: %w", err)
+	}
 	return openai.New(openai.Config{
-		APIKey:          env(cfg.apiKeyEnv),
+		APIKey:          apiKey,
 		API:             openai.API(cfg.api),
 		APIVersion:      cfg.apiVersion,
 		Model:           cfg.model,
