@@ -18,6 +18,8 @@ import (
 
 type config struct {
 	provider        string
+	api             string
+	apiVersion      string
 	model           string
 	baseURL         string
 	apiKeyEnv       string
@@ -71,6 +73,18 @@ func parseConfig(args []string) (config, error) {
 	flags.SetOutput(os.Stderr)
 	var config config
 	flags.StringVar(&config.provider, "provider", env("J_AGENT_PROVIDER"), "model provider: openai")
+	flags.StringVar(
+		&config.api,
+		"api",
+		env("J_AGENT_API"),
+		"provider API: openai-completions or azure-openai-completions",
+	)
+	flags.StringVar(
+		&config.apiVersion,
+		"api-version",
+		env("J_AGENT_API_VERSION"),
+		"provider API version",
+	)
 	flags.StringVar(&config.model, "model", env("J_AGENT_MODEL"), "provider model name")
 	flags.StringVar(&config.baseURL, "base-url", env("J_AGENT_BASE_URL"), "provider API base URL")
 	flags.StringVar(
@@ -96,6 +110,8 @@ func parseConfig(args []string) (config, error) {
 		return config, err
 	}
 	config.provider = strings.ToLower(strings.TrimSpace(config.provider))
+	config.api = strings.ToLower(strings.TrimSpace(config.api))
+	config.apiVersion = strings.TrimSpace(config.apiVersion)
 	config.model = strings.TrimSpace(config.model)
 	config.baseURL = strings.TrimSpace(config.baseURL)
 	config.apiKeyEnv = strings.TrimSpace(config.apiKeyEnv)
@@ -104,8 +120,15 @@ func parseConfig(args []string) (config, error) {
 	if config.provider == "" {
 		config.provider = "openai"
 	}
+	if config.api == "" {
+		config.api = string(openai.APICompletions)
+	}
 	if config.apiKeyEnv == "" {
-		config.apiKeyEnv = "OPENAI_API_KEY"
+		if config.api == string(openai.APIAzureCompletions) {
+			config.apiKeyEnv = "AZURE_OPENAI_API_KEY"
+		} else {
+			config.apiKeyEnv = "OPENAI_API_KEY"
+		}
 	}
 	if config.reasoningField == "" {
 		config.reasoningField = "omit"
@@ -122,6 +145,20 @@ func parseConfig(args []string) (config, error) {
 	}
 	if config.provider != "openai" {
 		return config, fmt.Errorf("unsupported provider %q", config.provider)
+	}
+	switch openai.API(config.api) {
+	case openai.APICompletions:
+		if config.apiVersion != "" {
+			return config, errors.New("openai-completions does not use --api-version")
+		}
+	case openai.APIAzureCompletions:
+		if config.apiVersion == "" {
+			return config, errors.New(
+				"--api-version or J_AGENT_API_VERSION is required for azure-openai-completions",
+			)
+		}
+	default:
+		return config, fmt.Errorf("unsupported provider API %q", config.api)
 	}
 	switch config.reasoningField {
 	case "omit", "reasoning_content", "reasoning":
@@ -142,6 +179,8 @@ func buildModel(config config) (agent.Model, error) {
 	}
 	return openai.New(openai.Config{
 		APIKey:          env(config.apiKeyEnv),
+		API:             openai.API(config.api),
+		APIVersion:      config.apiVersion,
 		Model:           config.model,
 		BaseURL:         config.baseURL,
 		ReasoningField:  parseReasoningField(config.reasoningField),

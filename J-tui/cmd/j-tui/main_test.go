@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,9 +33,50 @@ func TestParseConfigJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.mode != "json" || cfg.provider != "openai" ||
+		cfg.api != "openai-completions" ||
 		cfg.model != "qwen3.6:27b-q4_K_M" ||
 		cfg.reasoningField != "reasoning" || len(cfg.prompts) != 1 {
 		t.Fatalf("unexpected config: %#v", cfg)
+	}
+}
+
+func TestParseConfigAcceptsAzureOpenAICompletionsProfile(t *testing.T) {
+	home := isolateConfig(t)
+	path := filepath.Join(home, ".j", "config.json")
+	writeConfig(t, path, `{
+		"defaultProfile": "gpt-5.5",
+		"profiles": {
+			"gpt-5.5": {
+				"provider": "openai",
+				"api": "azure-openai-completions",
+				"apiVersion": "2024-02-01",
+				"model": "gpt-5.5-2026-04-24",
+				"baseURL": "https://example.invalid/modelhub",
+				"apiKeyEnv": "GPT_5_5_API_KEY"
+			}
+		}
+	}`)
+	cfg, err := parseConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.provider != "openai" || cfg.api != "azure-openai-completions" ||
+		cfg.apiVersion != "2024-02-01" ||
+		cfg.model != "gpt-5.5-2026-04-24" ||
+		cfg.apiKeyEnv != "GPT_5_5_API_KEY" {
+		t.Fatalf("config=%#v", cfg)
+	}
+}
+
+func TestParseConfigRequiresAzureOpenAIAPIVersion(t *testing.T) {
+	isolateConfig(t)
+	_, err := parseConfig([]string{
+		"--api", "azure-openai-completions",
+		"--model", "deployment",
+		"--base-url", "https://example.invalid",
+	})
+	if err == nil || !strings.Contains(err.Error(), "version") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -203,6 +246,54 @@ func TestRunInitializesConfig(t *testing.T) {
 		"--config", path,
 	}, &output); err == nil {
 		t.Fatal("existing config was overwritten")
+	}
+}
+
+func TestRunJSONTracksAzureOpenAICompletionsEvents(t *testing.T) {
+	isolateConfig(t)
+	t.Setenv("GPT_5_5_API_KEY", "secret")
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path !=
+			"/gateway/openai/deployments/gpt-5.5-2026-04-24/chat/completions" {
+			t.Fatalf("path=%q", request.URL.Path)
+		}
+		if request.URL.Query().Get("api-version") != "2024-02-01" ||
+			request.Header.Get("api-key") != "secret" {
+			t.Fatalf("request URL=%q headers=%v", request.URL.String(), request.Header)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte(
+			"data: " +
+				`{"id":"azure-1","model":"gpt-5.5-2026-04-24","choices":[{"delta":{"content":"2"},"finish_reason":"stop"}]}` +
+				"\n\ndata: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	var output bytes.Buffer
+	err := run(context.Background(), []string{
+		"--mode", "json",
+		"--provider", "openai",
+		"--api", "azure-openai-completions",
+		"--api-version", "2024-02-01",
+		"--model", "gpt-5.5-2026-04-24",
+		"--base-url", server.URL + "/gateway",
+		"--api-key-env", "GPT_5_5_API_KEY",
+		"1+1",
+	}, &output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := output.String()
+	for _, eventType := range []string{
+		`"type":"agent.started"`,
+		`"type":"message.delta"`,
+		`"type":"turn.completed"`,
+		`"type":"agent.completed"`,
+	} {
+		if !strings.Contains(trace, eventType) {
+			t.Fatalf("missing %s in trace:\n%s", eventType, trace)
+		}
 	}
 }
 
@@ -440,6 +531,8 @@ func isolateConfig(t *testing.T) string {
 		"J_TUI_CONFIG",
 		"J_TUI_PROFILE",
 		"J_TUI_PROVIDER",
+		"J_TUI_API",
+		"J_TUI_API_VERSION",
 		"J_TUI_MODEL",
 		"J_TUI_BASE_URL",
 		"J_TUI_API_KEY_ENV",

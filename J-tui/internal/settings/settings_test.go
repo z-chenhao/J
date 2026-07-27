@@ -14,6 +14,8 @@ func TestLoadAndResolve(t *testing.T) {
 		"profiles": {
 			"local": {
 				"provider": "openai",
+				"api": "azure-openai-completions",
+				"apiVersion": "2024-02-01",
 				"model": "qwen",
 				"baseURL": "http://127.0.0.1:8000/v1",
 				"reasoningField": "reasoning_content"
@@ -28,7 +30,8 @@ func TestLoadAndResolve(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if name != "local" || profile.Model != "qwen" ||
+	if name != "local" || profile.API != "azure-openai-completions" ||
+		profile.APIVersion != "2024-02-01" || profile.Model != "qwen" ||
 		profile.ReasoningField != "reasoning_content" {
 		t.Fatalf("name=%q profile=%#v", name, profile)
 	}
@@ -81,7 +84,8 @@ func TestWriteDefaultCreatesPrivateConfigWithoutOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if file.DefaultProfile != "omlx" || len(file.Profiles) != 3 {
+	if file.DefaultProfile != "omlx" || len(file.Profiles) != 3 ||
+		file.Profiles["omlx"].API != "openai-completions" {
 		t.Fatalf("file=%#v", file)
 	}
 	if err := WriteDefault(path); err == nil || !strings.Contains(err.Error(), "already exists") {

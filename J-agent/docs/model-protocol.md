@@ -91,7 +91,7 @@ Providers pass the caller's schema through without rewriting it. Provider
 rejection remains explicit. A cross-provider schema normalizer should wait
 until incompatible real tools demonstrate a stable transformation rule.
 
-## OpenAI-compatible provider mapping
+## OpenAI provider mappings
 
 Provider sources:
 
@@ -100,24 +100,34 @@ Provider sources:
 - [DeepSeek context cache](https://api-docs.deepseek.com/zh-cn/guides/kv_cache/)
 - [Ollama OpenAI compatibility](https://docs.ollama.com/api/openai-compatibility)
 - [oMLX repository and tiered KV cache](https://github.com/jundot/omlx)
+- [OpenAI Python Azure client](https://github.com/openai/openai-python/blob/main/src/openai/lib/azure.py)
+- [Azure OpenAI Chat Completions route](https://learn.microsoft.com/en-us/azure/ai-services/openai/references/on-your-data)
 
-| J-agent concept | DeepSeek | Ollama | oMLX |
-| --- | --- | --- | --- |
-| base URL recipe | `https://api.deepseek.com` | `http://127.0.0.1:11434/v1` | `http://127.0.0.1:8000/v1` |
-| endpoint and stream | `/chat/completions`, SSE | `/chat/completions`, SSE | `/chat/completions`, SSE |
-| retained reasoning field | `reasoning_content` | `reasoning` | `reasoning_content` |
-| tool call arguments | JSON encoded as a string | JSON encoded as a string | JSON encoded as a string |
-| tool result correlation | `tool_call_id` | `tool_call_id` | `tool_call_id` |
-| stop reason | `finish_reason` | `finish_reason` | `finish_reason` |
-| input/output usage | `prompt_tokens` / `completion_tokens` | `prompt_tokens` / `completion_tokens` | `prompt_tokens` / `completion_tokens` |
-| cache usage | DeepSeek cache fields | not reported by chat usage | `prompt_tokens_details.cached_tokens` |
+| J-agent concept | DeepSeek | Ollama | oMLX | Azure OpenAI |
+| --- | --- | --- | --- | --- |
+| API mode | `openai-completions` | `openai-completions` | `openai-completions` | `azure-openai-completions` |
+| endpoint and stream | `/chat/completions`, SSE | `/chat/completions`, SSE | `/chat/completions`, SSE | `/openai/deployments/{model}/chat/completions?api-version=...`, SSE |
+| authentication | bearer token | optional bearer token | optional bearer token | `api-key` |
+| retained reasoning field | `reasoning_content` | `reasoning` | `reasoning_content` | configured when required |
+| tool call arguments | JSON string | JSON string | JSON string | JSON string |
+| tool result correlation | `tool_call_id` | `tool_call_id` | `tool_call_id` | `tool_call_id` |
+| stop reason | `finish_reason` | `finish_reason` | `finish_reason` | `finish_reason` |
+| input/output usage | chat usage | chat usage | chat usage | when present in the stream |
+| cache usage | DeepSeek cache fields | not reported by chat usage | `prompt_tokens_details.cached_tokens` | not inferred |
 
-One `provider/openai` implementation owns this narrow Chat Completions
-contract. Its typed `ReasoningField` setting covers the only request-history
-shape difference observed in tool continuation; the response reader accepts
-both reasoning fields. It does not expose a generic extra-body map, provider
-profile registry, or arbitrary compatibility hook. None of these differences
-appear as conditionals in the agent loop.
+One `provider/openai` implementation owns these narrow Chat Completions
+contracts. Its typed `API` setting separates wire protocol from Provider
+identity: the default OpenAI-compatible mode appends `/chat/completions` and
+uses bearer authentication, while the Azure mode constructs the deployment
+route, sends `api-version`, and authenticates with `api-key`. Azure mode omits
+`stream_options` because the selected API version or gateway may not report
+usage during streaming; missing usage remains an honest absence.
+
+The typed `ReasoningField` setting covers the request-history shape differences
+observed in tool continuation; the response reader accepts both reasoning
+fields. The Provider does not expose a generic extra-body map, arbitrary
+headers, provider profile registry, or compatibility hook. None of these
+differences appear as conditionals in the agent loop.
 
 DeepSeek enables its context cache automatically. J-agent does not send a
 provider-specific cache switch: its ordered, append-only transcript preserves

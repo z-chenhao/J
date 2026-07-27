@@ -27,6 +27,8 @@ type config struct {
 	initConfig      bool
 	mode            string
 	provider        string
+	api             string
+	apiVersion      string
 	model           string
 	baseURL         string
 	apiKeyEnv       string
@@ -104,6 +106,13 @@ func parseConfig(args []string) (config, error) {
 	flags.BoolVar(&values.initConfig, "init-config", false, "create a starter configuration and exit")
 	flags.StringVar(&values.mode, "mode", "tui", "output mode: tui or json")
 	flags.StringVar(&values.provider, "provider", "", "model provider: openai")
+	flags.StringVar(
+		&values.api,
+		"api",
+		"",
+		"provider API: openai-completions or azure-openai-completions",
+	)
+	flags.StringVar(&values.apiVersion, "api-version", "", "provider API version")
 	flags.StringVar(&values.model, "model", "", "provider model name")
 	flags.StringVar(&values.baseURL, "base-url", "", "provider API base URL")
 	flags.StringVar(
@@ -161,6 +170,7 @@ func parseConfig(args []string) (config, error) {
 		configPath:      configPath,
 		mode:            "tui",
 		provider:        "openai",
+		api:             string(openai.APICompletions),
 		reasoningField:  "omit",
 		reasoningEffort: "default",
 	}
@@ -183,6 +193,8 @@ func parseConfig(args []string) (config, error) {
 		}
 		cfg.profile = resolvedName
 		cfg.provider = profile.Provider
+		cfg.api = profile.API
+		cfg.apiVersion = profile.APIVersion
 		cfg.model = profile.Model
 		cfg.baseURL = profile.BaseURL
 		cfg.apiKeyEnv = profile.APIKeyEnv
@@ -196,13 +208,22 @@ func parseConfig(args []string) (config, error) {
 
 	cfg.mode = strings.ToLower(strings.TrimSpace(cfg.mode))
 	cfg.provider = strings.ToLower(strings.TrimSpace(cfg.provider))
+	cfg.api = strings.ToLower(strings.TrimSpace(cfg.api))
+	cfg.apiVersion = strings.TrimSpace(cfg.apiVersion)
 	cfg.model = strings.TrimSpace(cfg.model)
 	cfg.baseURL = strings.TrimSpace(cfg.baseURL)
 	cfg.apiKeyEnv = strings.TrimSpace(cfg.apiKeyEnv)
 	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
+	if cfg.api == "" {
+		cfg.api = string(openai.APICompletions)
+	}
 	if !apiKeySpecified {
-		cfg.apiKeyEnv = "OPENAI_API_KEY"
+		if cfg.api == string(openai.APIAzureCompletions) {
+			cfg.apiKeyEnv = "AZURE_OPENAI_API_KEY"
+		} else {
+			cfg.apiKeyEnv = "OPENAI_API_KEY"
+		}
 	}
 	if cfg.reasoningField == "" {
 		cfg.reasoningField = "omit"
@@ -229,6 +250,20 @@ func parseConfig(args []string) (config, error) {
 	if cfg.provider != "openai" {
 		return config{}, fmt.Errorf("unsupported provider %q", cfg.provider)
 	}
+	switch openai.API(cfg.api) {
+	case openai.APICompletions:
+		if cfg.apiVersion != "" {
+			return config{}, errors.New("openai-completions does not use --api-version")
+		}
+	case openai.APIAzureCompletions:
+		if cfg.apiVersion == "" {
+			return config{}, errors.New(
+				"Azure OpenAI API version is required; set apiVersion, --api-version, or J_TUI_API_VERSION",
+			)
+		}
+	default:
+		return config{}, fmt.Errorf("unsupported provider API %q", cfg.api)
+	}
 	switch cfg.reasoningField {
 	case "omit", "reasoning_content", "reasoning":
 	default:
@@ -253,6 +288,8 @@ func loadSettings(path string) (settings.File, bool, error) {
 func applyEnvironment(cfg *config, apiKeySpecified *bool) {
 	for name, target := range map[string]*string{
 		"J_TUI_PROVIDER":         &cfg.provider,
+		"J_TUI_API":              &cfg.api,
+		"J_TUI_API_VERSION":      &cfg.apiVersion,
 		"J_TUI_MODEL":            &cfg.model,
 		"J_TUI_BASE_URL":         &cfg.baseURL,
 		"J_TUI_REASONING_FIELD":  &cfg.reasoningField,
@@ -280,6 +317,8 @@ func applyFlags(
 	}{
 		"mode":             {&cfg.mode, values.mode},
 		"provider":         {&cfg.provider, values.provider},
+		"api":              {&cfg.api, values.api},
+		"api-version":      {&cfg.apiVersion, values.apiVersion},
 		"model":            {&cfg.model, values.model},
 		"base-url":         {&cfg.baseURL, values.baseURL},
 		"reasoning-field":  {&cfg.reasoningField, values.reasoningField},
@@ -301,6 +340,8 @@ func buildModel(cfg config) (agent.Model, error) {
 	}
 	return openai.New(openai.Config{
 		APIKey:          env(cfg.apiKeyEnv),
+		API:             openai.API(cfg.api),
+		APIVersion:      cfg.apiVersion,
 		Model:           cfg.model,
 		BaseURL:         cfg.baseURL,
 		ReasoningField:  parseReasoningField(cfg.reasoningField),

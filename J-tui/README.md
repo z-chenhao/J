@@ -51,6 +51,7 @@ overwrite an existing file. It contains connection recipes, not API keys:
   "profiles": {
     "omlx": {
       "provider": "openai",
+      "api": "openai-completions",
       "model": "Qwen3.6-35B-A3B-oQ4e-mtp",
       "baseURL": "http://127.0.0.1:8000/v1",
       "apiKeyEnv": "OMLX_API_KEY",
@@ -58,6 +59,7 @@ overwrite an existing file. It contains connection recipes, not API keys:
     },
     "deepseek": {
       "provider": "openai",
+      "api": "openai-completions",
       "model": "deepseek-chat",
       "baseURL": "https://api.deepseek.com",
       "apiKeyEnv": "DEEPSEEK_API_KEY",
@@ -65,6 +67,7 @@ overwrite an existing file. It contains connection recipes, not API keys:
     },
     "ollama": {
       "provider": "openai",
+      "api": "openai-completions",
       "model": "qwen3",
       "baseURL": "http://127.0.0.1:11434/v1",
       "reasoningField": "reasoning"
@@ -96,9 +99,31 @@ The default file is user-scoped. J-tui does not search parent directories,
 merge project settings, mutate the file during a conversation, or expose the
 configuration schema through J-agent.
 
+`provider` selects the J-agent Provider implementation. `api` independently
+selects its wire protocol. Existing profiles that omit `api` continue to use
+`openai-completions`.
+
+An Azure OpenAI Chat Completions profile is:
+
+```json
+{
+  "provider": "openai",
+  "api": "azure-openai-completions",
+  "apiVersion": "2024-02-01",
+  "model": "gpt-5.5-2026-04-24",
+  "baseURL": "https://example.internal/modelhub",
+  "apiKeyEnv": "GPT_5_5_API_KEY"
+}
+```
+
+The endpoint and model are opaque configuration. Azure mode appends
+`/openai/deployments/{model}/chat/completions`, adds the API-version query, and
+uses the `api-key` header. It deliberately does not provide arbitrary headers,
+query parameters, or request-body configuration.
+
 ## Run from the repository
 
-J-tui directly composes J-agent's OpenAI-compatible provider. The repository's
+J-tui directly composes J-agent's OpenAI Provider. The repository's
 local development recipe selects the oMLX model
 `Qwen3.6-35B-A3B-oQ4e-mtp`; the first-party Bash tool is enabled in the
 command's current working directory:
@@ -112,6 +137,7 @@ The equivalent explicit invocation is:
 ```bash
 go run ./cmd/j-tui \
   --provider openai \
+  --api openai-completions \
   --model Qwen3.6-35B-A3B-oQ4e-mtp \
   --base-url http://127.0.0.1:8000/v1 \
   --api-key-env OMLX_API_KEY \
@@ -124,6 +150,7 @@ environment:
 ```bash
 go run ./cmd/j-tui \
   --provider openai \
+  --api openai-completions \
   --model deepseek-v4-flash \
   --base-url https://api.deepseek.com \
   --api-key-env DEEPSEEK_API_KEY \
@@ -163,7 +190,7 @@ does the same when several prompts are passed to one invocation.
 
 The footer reports provider-observed cache hit and miss tokens. JSON event mode
 keeps `usage.inputTokens` and `usage.cachedInputTokens`; cache misses are
-`inputTokens - cachedInputTokens`. The OpenAI-compatible provider maps
+`inputTokens - cachedInputTokens`. The `openai-completions` API maps
 `prompt_tokens_details.cached_tokens` into that same provider-neutral usage
 field and also understands DeepSeek's cache hit fields. Cache population and
 hits remain best-effort service behavior and cannot be guaranteed by the

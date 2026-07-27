@@ -42,12 +42,13 @@ The core does not provide:
 - Go 1.26 or newer; repository development selects Go 1.26.5 or a newer
   compatible toolchain
 
-## OpenAI-compatible provider
+## OpenAI provider
 
-J-agent has one experimental streaming Chat Completions provider. DeepSeek,
-oMLX, and Ollama are selected by endpoint and model, not separate runtime
-implementations. The base URL and model are deliberately explicit because
-server defaults and model names can change.
+J-agent has one experimental streaming Chat Completions Provider with two
+explicit wire APIs. `openai-completions` is the default and serves DeepSeek,
+oMLX, Ollama, and other compatible servers. `azure-openai-completions` owns the
+Azure deployment route, `api-version` query, and `api-key` authentication. The
+base URL and model remain opaque operator configuration.
 
 The repository's local recipe uses oMLX:
 
@@ -83,11 +84,31 @@ reasoning must be replayed during tool continuation. Use
 `reasoning_effort` field only when it is not `default`; the selected server and
 model decide which values they support.
 
+An Azure OpenAI-compatible endpoint selects its protocol explicitly:
+
+```bash
+export GPT_5_5_API_KEY='...'
+
+go run ./cmd/j-agent \
+  --provider openai \
+  --api azure-openai-completions \
+  --api-version 2024-02-01 \
+  --model gpt-5.5-2026-04-24 \
+  --base-url https://example.internal/modelhub \
+  --api-key-env GPT_5_5_API_KEY \
+  "What is 1+1?"
+```
+
+The Azure base URL is the endpoint root. The Provider appends
+`/openai/deployments/{model}/chat/completions` and the API-version query. It
+does not inspect the endpoint hostname or model name.
+
 The API key itself is never accepted as a command-line value.
 `--api-key-env` names the environment variable to read and defaults to
-`OPENAI_API_KEY`. The equivalent environment configuration uses
-`J_AGENT_PROVIDER`, `J_AGENT_MODEL`, `J_AGENT_BASE_URL`,
-`J_AGENT_API_KEY_ENV`, `J_AGENT_REASONING_FIELD`, and
+`OPENAI_API_KEY`, or `AZURE_OPENAI_API_KEY` when the Azure API is selected.
+The equivalent environment configuration also supports `J_AGENT_API` and
+`J_AGENT_API_VERSION` alongside `J_AGENT_PROVIDER`, `J_AGENT_MODEL`,
+`J_AGENT_BASE_URL`, `J_AGENT_API_KEY_ENV`, `J_AGENT_REASONING_FIELD`, and
 `J_AGENT_REASONING_EFFORT`.
 
 DeepSeek and oMLX own their server-side prompt/KV caches. J-agent preserves the
@@ -182,9 +203,10 @@ history is authoritative, including any system message, so a non-empty
 `WithSystemPrompt` cannot be supplied at the same time. Storage format,
 durability, session identity, and retention policy remain application concerns.
 
-The `agent` package is experimental. One provider implementation is exercised
-against several real OpenAI-compatible servers, but that does not substitute
-for an independent provider implementation or external production consumers.
+The `agent` package is experimental. One Provider implementation is exercised
+against two explicit Chat Completions protocols and several servers, but that
+does not substitute for an independent `Model` implementation or external
+production consumers.
 See [Architecture](docs/architecture.md) and
 [model protocol research](docs/model-protocol.md).
 
@@ -227,7 +249,7 @@ make check
 agent/              experimental embeddable Go runtime
 cmd/j-agent/        reference CLI and JSONL process
 internal/runtime/   private queue and JSONL transport
-provider/openai/    experimental OpenAI-compatible provider
+provider/openai/    experimental OpenAI Chat Completions provider
 tool/bash/          experimental first-party Bash Tool
 docs/               architecture and protocol contracts
 research/           external model and harness research

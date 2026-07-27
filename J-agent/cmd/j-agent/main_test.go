@@ -9,6 +9,8 @@ import (
 
 func TestParseConfigRequiresModelAndBaseURL(t *testing.T) {
 	t.Setenv("J_AGENT_PROVIDER", "")
+	t.Setenv("J_AGENT_API", "")
+	t.Setenv("J_AGENT_API_VERSION", "")
 	t.Setenv("J_AGENT_MODEL", "")
 	t.Setenv("J_AGENT_BASE_URL", "")
 	if _, err := parseConfig(nil); err == nil || !strings.Contains(err.Error(), "model") {
@@ -28,6 +30,8 @@ func TestParseConfigReturnsHelpWithoutValidation(t *testing.T) {
 
 func TestParseConfigUsesOpenAIProviderOptions(t *testing.T) {
 	t.Setenv("J_AGENT_PROVIDER", "")
+	t.Setenv("J_AGENT_API", "")
+	t.Setenv("J_AGENT_API_VERSION", "")
 	t.Setenv("J_AGENT_MODEL", "")
 	t.Setenv("J_AGENT_BASE_URL", "")
 	config, err := parseConfig([]string{
@@ -42,11 +46,35 @@ func TestParseConfigUsesOpenAIProviderOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseConfig() error: %v", err)
 	}
-	if config.provider != "openai" || config.model != "qwen3" ||
+	if config.provider != "openai" || config.api != "openai-completions" ||
+		config.model != "qwen3" ||
 		config.apiKeyEnv != "OMLX_API_KEY" ||
 		config.reasoningField != "reasoning_content" ||
 		config.reasoningEffort != "high" ||
 		strings.Join(config.prompt, " ") != "hello" {
+		t.Fatalf("config=%#v", config)
+	}
+}
+
+func TestParseConfigUsesAzureOpenAICompletionsAPI(t *testing.T) {
+	t.Setenv("J_AGENT_PROVIDER", "")
+	t.Setenv("J_AGENT_API", "")
+	t.Setenv("J_AGENT_API_VERSION", "")
+	t.Setenv("J_AGENT_MODEL", "")
+	t.Setenv("J_AGENT_BASE_URL", "")
+	config, err := parseConfig([]string{
+		"--api", "azure-openai-completions",
+		"--api-version", "2024-02-01",
+		"--model", "gpt-5.5-2026-04-24",
+		"--base-url", "https://example.invalid/modelhub",
+		"--api-key-env", "GPT_5_5_API_KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.api != "azure-openai-completions" ||
+		config.apiVersion != "2024-02-01" ||
+		config.apiKeyEnv != "GPT_5_5_API_KEY" {
 		t.Fatalf("config=%#v", config)
 	}
 }
@@ -67,6 +95,8 @@ func TestBuildOpenAIProviderUsesOptionalEnvironmentCredential(t *testing.T) {
 
 func TestParseConfigRejectsFormerProviderNames(t *testing.T) {
 	t.Setenv("J_AGENT_PROVIDER", "")
+	t.Setenv("J_AGENT_API", "")
+	t.Setenv("J_AGENT_API_VERSION", "")
 	t.Setenv("J_AGENT_MODEL", "")
 	t.Setenv("J_AGENT_BASE_URL", "")
 	_, err := parseConfig([]string{

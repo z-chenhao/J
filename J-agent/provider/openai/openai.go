@@ -1,5 +1,5 @@
-// Package openai provides an experimental OpenAI-compatible Chat Completions
-// provider for agent.Model.
+// Package openai provides an experimental OpenAI Chat Completions provider for
+// agent.Model.
 package openai
 
 import (
@@ -19,6 +19,17 @@ import (
 )
 
 const maxResponseSize = 16 << 20
+
+// API identifies the concrete Chat Completions wire protocol.
+type API string
+
+const (
+	// APICompletions uses the OpenAI-compatible /chat/completions protocol.
+	APICompletions API = "openai-completions"
+	// APIAzureCompletions uses Azure OpenAI deployment routing and API-key
+	// authentication for Chat Completions.
+	APIAzureCompletions API = "azure-openai-completions"
+)
 
 // ReasoningField controls how retained reasoning is represented in assistant
 // messages sent back during tool continuation.
@@ -43,9 +54,11 @@ const (
 	ReasoningEffortMax     ReasoningEffort = "max"
 )
 
-// Config configures one OpenAI-compatible Chat Completions provider.
+// Config configures one OpenAI Chat Completions provider.
 type Config struct {
 	APIKey          string
+	API             API
+	APIVersion      string
 	Model           string
 	BaseURL         string
 	ReasoningField  ReasoningField
@@ -53,10 +66,11 @@ type Config struct {
 	HTTPClient      *http.Client
 }
 
-// Model implements agent.Model using an OpenAI-compatible streaming Chat
-// Completions API.
+// Model implements agent.Model using a supported streaming Chat Completions
+// API.
 type Model struct {
 	apiKey          string
+	api             API
 	model           string
 	endpoint        string
 	reasoningField  ReasoningField
@@ -74,11 +88,16 @@ func (err *HTTPError) Error() string {
 	return fmt.Sprintf("openai provider HTTP %d: %s", err.StatusCode, err.Message)
 }
 
-// New validates config and creates an OpenAI-compatible provider.
+// New validates config and creates an OpenAI provider.
 func New(config Config) (*Model, error) {
 	config.APIKey = strings.TrimSpace(config.APIKey)
+	config.API = API(strings.ToLower(strings.TrimSpace(string(config.API))))
+	config.APIVersion = strings.TrimSpace(config.APIVersion)
 	config.Model = strings.TrimSpace(config.Model)
 	config.BaseURL = strings.TrimSpace(config.BaseURL)
+	if config.API == "" {
+		config.API = APICompletions
+	}
 	if config.Model == "" {
 		return nil, errors.New("openai provider model is required")
 	}
@@ -93,8 +112,26 @@ func New(config Config) (*Model, error) {
 			"openai provider base URL must use HTTP or HTTPS and must not contain credentials, a query, or a fragment",
 		)
 	}
-	parsed.Path = strings.TrimRight(parsed.Path, "/") + "/chat/completions"
-	parsed.RawPath = ""
+	switch config.API {
+	case APICompletions:
+		if config.APIVersion != "" {
+			return nil, errors.New("openai-completions does not use an API version")
+		}
+		appendURLPath(parsed, "chat", "completions")
+	case APIAzureCompletions:
+		if config.APIVersion == "" {
+			return nil, errors.New("azure-openai-completions API version is required")
+		}
+		if config.APIKey == "" {
+			return nil, errors.New("azure-openai-completions API key is required")
+		}
+		appendURLPath(parsed, "openai", "deployments", config.Model, "chat", "completions")
+		query := parsed.Query()
+		query.Set("api-version", config.APIVersion)
+		parsed.RawQuery = query.Encode()
+	default:
+		return nil, fmt.Errorf("unsupported openai provider API %q", config.API)
+	}
 	switch config.ReasoningField {
 	case ReasoningFieldOmit, ReasoningFieldReasoningContent, ReasoningFieldReasoning:
 	default:
@@ -115,6 +152,7 @@ func New(config Config) (*Model, error) {
 	}
 	return &Model{
 		apiKey:          config.APIKey,
+		api:             config.API,
 		model:           config.Model,
 		endpoint:        parsed.String(),
 		reasoningField:  config.ReasoningField,
@@ -124,12 +162,12 @@ func New(config Config) (*Model, error) {
 }
 
 type chatRequest struct {
-	Model           string        `json:"model"`
-	Messages        []chatMessage `json:"messages"`
-	Tools           []chatTool    `json:"tools,omitempty"`
-	Stream          bool          `json:"stream"`
-	StreamOptions   streamOptions `json:"stream_options"`
-	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	Model           string         `json:"model"`
+	Messages        []chatMessage  `json:"messages"`
+	Tools           []chatTool     `json:"tools,omitempty"`
+	Stream          bool           `json:"stream"`
+	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
+	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
 }
 
 type streamOptions struct {
@@ -224,7 +262,10 @@ func (m *Model) Complete(
 	if err != nil {
 		return agent.ModelResponse{}, fmt.Errorf("create openai provider request: %w", err)
 	}
-	if m.apiKey != "" {
+	switch {
+	case m.api == APIAzureCompletions:
+		httpRequest.Header.Set("api-key", m.apiKey)
+	case m.apiKey != "":
 		httpRequest.Header.Set("Authorization", "Bearer "+m.apiKey)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
@@ -266,10 +307,25 @@ func (m *Model) request(request agent.ModelRequest) (chatRequest, error) {
 		Messages:        messages,
 		Tools:           tools,
 		Stream:          true,
-		StreamOptions:   streamOptions{IncludeUsage: true},
 		ReasoningEffort: string(m.reasoningEffort),
 	}
+	if m.api == APICompletions {
+		payload.StreamOptions = &streamOptions{IncludeUsage: true}
+	}
 	return payload, nil
+}
+
+func appendURLPath(target *url.URL, segments ...string) {
+	escaped := strings.TrimRight(target.EscapedPath(), "/")
+	for _, segment := range segments {
+		escaped += "/" + url.PathEscape(segment)
+	}
+	path, err := url.PathUnescape(escaped)
+	if err != nil {
+		panic("url.PathEscape produced an invalid path")
+	}
+	target.Path = path
+	target.RawPath = escaped
 }
 
 func mapMessage(message agent.Message, reasoningField ReasoningField) (chatMessage, error) {

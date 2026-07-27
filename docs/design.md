@@ -16,11 +16,12 @@ kernel. J-tui and J-mem are first-party consumers used to prove that the public
 seams are sufficient for real customization.
 
 Current verified consumers of J-agent are its reference CLI, private JSONL
-runtime, and J-tui. One OpenAI-compatible provider exercises the model seam
-against DeepSeek, Ollama, and oMLX; these servers do not count as independent
-`Model` implementations. J-tui consumes the public event and cancellation
-seams without a runtime API change. J-mem is an explicit project boundary but
-does not yet count as a validating implementation.
+runtime, and J-tui. One OpenAI Provider exercises the model seam through
+OpenAI-compatible and Azure OpenAI Chat Completions protocols; the backing
+servers do not count as independent `Model` implementations. J-tui consumes
+the public event and cancellation seams without a runtime API change. J-mem is
+an explicit project boundary but does not yet count as a validating
+implementation.
 
 ## 2. Engineering constitution
 
@@ -65,11 +66,15 @@ JSON Lines diagnostic stream. J-tui adopts only that narrow mechanism:
 protocol compatibility. Pi's queue, compaction, retry, extension, and session
 events remain product policy outside J-agent.
 
-Pi also separates global/project settings, custom model definitions, and
-stored authentication. J-tui adopts only the currently proven subset: one
-user-scoped file of named model connections whose credentials remain in
-environment variables. Project merging, credential storage, and an interactive
-settings editor would add policy without a current consumer and are deferred.
+Pi also separates provider identity, wire API, model metadata, settings scope,
+and stored authentication. Its custom model configuration can select an API
+such as `openai-completions` independently from the provider name. J-tui adopts
+only the currently proven subset: one user-scoped file of named model
+connections, an explicit API protocol, and credentials that remain in
+environment variables. Project merging, credential storage, arbitrary headers,
+command-based secret resolution, model catalogs, compatibility bags, and an
+interactive settings editor would add policy without a current consumer and
+are deferred.
 
 Primary sources:
 
@@ -128,11 +133,12 @@ J-agent currently opens four orthogonal composition seams:
 | `EventHandler` | TUI, gateway, logs, metrics | Experimental |
 | `History` / `WithHistory` | External transcript persistence and restoration | Experimental |
 
-One concrete OpenAI-compatible provider serves DeepSeek, Ollama, and the local
-oMLX integration behind the `Model` seam. This is protocol reuse, not three
-independent `Model` implementations. oMLX owns KV/prefix-cache storage and
-policy; J-agent owns only ordered transcript continuity and provider-reported
-usage normalization.
+One concrete OpenAI provider serves two explicit Chat Completions protocols
+behind the `Model` seam: `openai-completions` for DeepSeek, Ollama, and the
+local oMLX integration, and `azure-openai-completions` for Azure deployment
+routing. This is protocol reuse, not independent `Model` implementations.
+oMLX owns KV/prefix-cache storage and policy; J-agent owns only ordered
+transcript continuity and provider-reported usage normalization.
 
 `WithHistory` is intentionally construction-only. The restored transcript is
 authoritative, including any system message. J-agent validates message shape,
@@ -217,8 +223,8 @@ Rejected alternatives:
 
 J-tui is a minimal terminal UI. It calls J-agent, consumes lifecycle events,
 reads transcript snapshots, and cancels runs through `context.Context`.
-Its command explicitly composes the OpenAI-compatible provider with an
-operator-selected endpoint; it does not own dynamic model routing or provider
+Its command explicitly composes the OpenAI Provider with an operator-selected
+API protocol and endpoint; it does not own dynamic model routing or provider
 discovery.
 
 DeepSeek context caching requires no new runtime mechanism: the service enables
@@ -232,10 +238,11 @@ metadata. J-agent must not gain labels, colors, widgets, or TUI component types
 to serve J-tui.
 
 J-tui also owns its user-scoped `~/.j/config.json`, named model profiles, and
-binary distribution. The file contains model connection policy and names an
-environment variable for credentials; it does not store API keys. Command-line
-flags override environment variables, which override the selected profile.
-This is an experimental J-tui contract, not a J-agent configuration API.
+binary distribution. The file separates the `openai` Provider implementation
+from its selected `api` wire protocol and names an environment variable for
+credentials; it does not store API keys. Command-line flags override
+environment variables, which override the selected profile. This is an
+experimental J-tui contract, not a J-agent configuration API.
 Project-local configuration merging, runtime profile mutation, credential
 storage, provider discovery, and a general settings framework remain
 deliberately absent.
@@ -327,8 +334,8 @@ Potential future mechanisms must be validated in this order:
   `1.26.x` patch, repository development selects at least Go 1.26.5, and J does
   not maintain an older-version matrix without a real consumer.
 - J-agent remains a separate Go module under `J/J-agent`.
-- The OpenAI-compatible provider is real integration code; backend profiles and
-  demo models are not product features.
+- The OpenAI provider's typed Chat Completions API modes are real integration
+  code; backend profiles and demo models are not product features.
 - J-tui owns its experimental profile file and release artifacts; J-agent does
   not read product configuration or install packages.
 - J-Space research informs model/Harness choices but is not a runtime

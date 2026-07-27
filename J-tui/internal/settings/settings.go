@@ -23,6 +23,8 @@ type File struct {
 // Profile describes one concrete model connection.
 type Profile struct {
 	Provider        string `json:"provider"`
+	API             string `json:"api,omitempty"`
+	APIVersion      string `json:"apiVersion,omitempty"`
 	Model           string `json:"model"`
 	BaseURL         string `json:"baseURL"`
 	APIKeyEnv       string `json:"apiKeyEnv,omitempty"`
@@ -82,6 +84,7 @@ func WriteDefault(path string) error {
 		Profiles: map[string]Profile{
 			"omlx": {
 				Provider:       "openai",
+				API:            "openai-completions",
 				Model:          "Qwen3.6-35B-A3B-oQ4e-mtp",
 				BaseURL:        "http://127.0.0.1:8000/v1",
 				APIKeyEnv:      "OMLX_API_KEY",
@@ -89,6 +92,7 @@ func WriteDefault(path string) error {
 			},
 			"deepseek": {
 				Provider:       "openai",
+				API:            "openai-completions",
 				Model:          "deepseek-chat",
 				BaseURL:        "https://api.deepseek.com",
 				APIKeyEnv:      "DEEPSEEK_API_KEY",
@@ -96,6 +100,7 @@ func WriteDefault(path string) error {
 			},
 			"ollama": {
 				Provider:       "openai",
+				API:            "openai-completions",
 				Model:          "qwen3",
 				BaseURL:        "http://127.0.0.1:11434/v1",
 				ReasoningField: "reasoning",

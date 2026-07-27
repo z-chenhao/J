@@ -24,7 +24,8 @@ func TestCompleteHandlesOpenAICompatibleToolStreamAndCacheUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 		if payload.Model != "local-model" || !payload.Stream ||
-			!payload.StreamOptions.IncludeUsage || payload.ReasoningEffort != "high" {
+			payload.StreamOptions == nil || !payload.StreamOptions.IncludeUsage ||
+			payload.ReasoningEffort != "high" {
 			t.Fatalf("payload=%#v", payload)
 		}
 		if len(payload.Messages) != 2 ||
@@ -101,6 +102,60 @@ func TestCompleteHandlesOpenAICompatibleToolStreamAndCacheUsage(t *testing.T) {
 		deltas[2].Type != agent.DeltaToolCall ||
 		deltas[3].Type != agent.DeltaToolCall {
 		t.Fatalf("deltas=%#v", deltas)
+	}
+}
+
+func TestCompleteUsesAzureOpenAICompletionsProtocol(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.EscapedPath() !=
+			"/gateway/openai/deployments/gpt-5.5-2026-04-24/chat/completions" {
+			t.Fatalf("path=%q", request.URL.EscapedPath())
+		}
+		if version := request.URL.Query().Get("api-version"); version != "2024-02-01" {
+			t.Fatalf("api-version=%q", version)
+		}
+		if key := request.Header.Get("api-key"); key != "secret" {
+			t.Fatalf("api-key=%q", key)
+		}
+		if authorization := request.Header.Get("Authorization"); authorization != "" {
+			t.Fatalf("authorization=%q", authorization)
+		}
+		var payload chatRequest
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.Model != "gpt-5.5-2026-04-24" || !payload.Stream ||
+			payload.StreamOptions != nil {
+			t.Fatalf("payload=%#v", payload)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte(
+			"data: " +
+				`{"id":"azure-1","model":"gpt-5.5-2026-04-24","choices":[{"delta":{"content":"2"},"finish_reason":"stop"}]}` +
+				"\n\ndata: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	model, err := New(Config{
+		APIKey:     "secret",
+		API:        APIAzureCompletions,
+		APIVersion: "2024-02-01",
+		Model:      "gpt-5.5-2026-04-24",
+		BaseURL:    server.URL + "/gateway",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := model.Complete(context.Background(), agent.ModelRequest{
+		Messages: []agent.Message{agent.TextMessage(agent.RoleUser, "1+1")},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Provider != "openai" || response.Model != "gpt-5.5-2026-04-24" ||
+		response.Message.Text() != "2" {
+		t.Fatalf("response=%#v", response)
 	}
 }
 
@@ -217,6 +272,37 @@ func TestNewValidatesConfiguration(t *testing.T) {
 		ReasoningEffort: "extreme",
 	}); err == nil {
 		t.Fatal("invalid reasoning effort was accepted")
+	}
+	if _, err := New(Config{
+		API:     "unknown",
+		Model:   "local",
+		BaseURL: "http://localhost/v1",
+	}); err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("invalid API error=%v", err)
+	}
+	if _, err := New(Config{
+		API:     APIAzureCompletions,
+		APIKey:  "secret",
+		Model:   "deployment",
+		BaseURL: "http://localhost",
+	}); err == nil || !strings.Contains(err.Error(), "version") {
+		t.Fatalf("missing Azure API version error=%v", err)
+	}
+	if _, err := New(Config{
+		API:        APIAzureCompletions,
+		APIVersion: "2024-02-01",
+		Model:      "deployment",
+		BaseURL:    "http://localhost",
+	}); err == nil || !strings.Contains(err.Error(), "key") {
+		t.Fatalf("missing Azure API key error=%v", err)
+	}
+	if _, err := New(Config{
+		API:        APICompletions,
+		APIVersion: "2024-02-01",
+		Model:      "local",
+		BaseURL:    "http://localhost/v1",
+	}); err == nil || !strings.Contains(err.Error(), "does not use") {
+		t.Fatalf("unexpected standard API version error=%v", err)
 	}
 }
 

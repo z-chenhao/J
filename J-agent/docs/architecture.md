@@ -18,10 +18,12 @@ Current in-repository consumers are:
 - the private JSONL queue used by the reference process
 - J-tui's interactive and JSON event modes
 
-The OpenAI-compatible provider is exercised against DeepSeek, Ollama, and
-oMLX. Those servers validate one protocol implementation; they do not count as
-independent implementations of the `Model` seam. Applications embedding the Go
-`agent` package are the intended external audience, but external production
+The OpenAI Provider is exercised through the `openai-completions` API against
+DeepSeek, Ollama, and oMLX, and through the
+`azure-openai-completions` API's deployment-routing contract. Those protocols
+and servers validate one `Model` implementation; they do not count as
+independent implementations of the `Model` seam. Applications embedding the
+Go `agent` package are the intended external audience, but external production
 consumers have not yet been verified.
 
 The runtime must:
@@ -69,9 +71,9 @@ read `History`, but must not reenter `Run` or `Reset` on the same `Agent`.
 - model routing and harness recipes
 - transport and downstream protocol translation
 
-The OpenAI-compatible provider validates the model seam against three real
-servers. The JSONL process is a reference transport, not mandatory framework
-semantics.
+The OpenAI Provider validates the model seam against two explicit Chat
+Completions protocols. The JSONL process is a reference transport, not
+mandatory framework semantics.
 
 The first-party `tool/bash` package is replaceable policy implemented through
 the existing `Tool` seam. The reference commands opt into it; the `agent`
