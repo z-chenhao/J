@@ -314,9 +314,11 @@ func TestWriteDefaultCreatesPrivateConfigWithoutOverwrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	omlx := file.Profiles["omlx"]
 	if file.DefaultProfile != "omlx" || len(file.Profiles) != 3 ||
-		file.Profiles["omlx"].API != "openai-completions" ||
-		file.Profiles["omlx"].APIKey != "${OMLX_API_KEY}" {
+		omlx.API != "openai-completions" ||
+		omlx.BaseURL != "https://usej-model.tailb0426d.ts.net/v1" ||
+		omlx.APIKey != "" {
 		t.Fatalf("file=%#v", file)
 	}
 	if err := WriteDefault(path); err == nil || !strings.Contains(err.Error(), "already exists") {

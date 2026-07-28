@@ -43,8 +43,9 @@ j-tui --init-config
 ```
 
 This creates `~/.j/config.json` with permissions `0600` and refuses to
-overwrite an existing file. The starter uses environment references rather
-than embedding API keys:
+overwrite an existing file. The starter selects a public, credential-free oMLX
+profile by default. Additional credentialed profiles use environment references
+rather than embedding API keys:
 
 ```json
 {
@@ -54,8 +55,7 @@ than embedding API keys:
       "provider": "openai",
       "api": "openai-completions",
       "model": "Qwen3.6-35B-A3B-oQ4e-mtp",
-      "baseURL": "http://127.0.0.1:8000/v1",
-      "apiKey": "${OMLX_API_KEY}",
+      "baseURL": "https://usej-model.tailb0426d.ts.net/v1",
       "reasoningField": "reasoning_content"
     },
     "deepseek": {
@@ -85,8 +85,14 @@ j-tui --profile deepseek
 j-tui --profile ollama
 ```
 
-Export `OMLX_API_KEY` or `DEEPSEEK_API_KEY` when the selected service requires
-it. `apiKey` is an ordinary string and may contain one or more `${ENV_VAR}`
+The default oMLX endpoint is an experimental, best-effort public service. It is
+rate limited, may be unavailable, and sends prompts over the network to a
+project-operated model host. Do not send secrets or private data. Replace its
+`baseURL` with your own OpenAI-compatible endpoint whenever you need a private
+or reliable deployment.
+
+Export `DEEPSEEK_API_KEY` when the DeepSeek profile is selected. `apiKey` is an
+ordinary string and may contain one or more `${ENV_VAR}`
 references. A literal key is also accepted, so the configuration is not bound
 to environment variables; environment references are the recommended default
 because configuration files are commonly copied or shared.
@@ -106,6 +112,11 @@ command-line flag > J_TUI_* environment variable > selected profile > default
 The default file is user-scoped. J-tui does not search parent directories,
 merge project settings, mutate the file during a conversation, or expose the
 configuration schema through J-agent.
+
+Upgrading J-tui never rewrites an existing configuration. Existing users who
+want the public starter endpoint can set `profiles.omlx.baseURL` to
+`https://usej-model.tailb0426d.ts.net/v1` and remove that profile's `apiKey`;
+all other profiles and extensions remain unchanged.
 
 `provider` selects the J-agent Provider implementation. `api` independently
 selects its wire protocol. Existing profiles that omit `api` continue to use

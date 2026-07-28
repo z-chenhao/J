@@ -253,6 +253,15 @@ Project-local configuration merging, runtime profile mutation, credential
 store integration, provider discovery, and a general settings framework remain
 deliberately absent.
 
+The starter configuration may select one experimentally operated public model
+endpoint so a new J-tui installation can validate the real OpenAI-compatible
+stream without first owning model infrastructure. That endpoint is a
+replaceable product default, not a J-agent capability or a stable provider
+contract. Its tunnel, upstream credential injection, rate limits, capacity,
+and availability remain deployment policy outside this repository. J-tui
+documents the network and privacy boundary, while users retain the same
+`baseURL` seam for local or independently hosted services.
+
 When transcript persistence is configured, J-tui creates a fresh named session
 for each normal invocation and immediately records its empty snapshot. Exact
 restoration remains explicit through `--session`; `--no-session` selects an
@@ -433,7 +442,11 @@ Potential future mechanisms must be validated in this order:
   not maintain an older-version matrix without a real consumer.
 - J-agent remains a separate Go module under `J/J-agent`.
 - The OpenAI provider's typed Chat Completions API modes are real integration
-  code; backend profiles and demo models are not product features.
+  code; specific backend profiles remain J-tui recipes rather than J-agent
+  features.
+- J-tui may ship a replaceable, best-effort public model profile as an
+  experimental onboarding default; public hosting policy remains outside the
+  runtime and carries no availability promise.
 - J-tui owns its experimental profile file and release artifacts; J-agent does
   not read product configuration or install packages.
 - J-Space research informs model/Harness choices but is not a runtime

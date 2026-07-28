@@ -38,10 +38,13 @@ j-tui
 The installer places the binary in `~/.local/bin` by default. Set
 `J_TUI_INSTALL_DIR` to choose another directory.
 
-`--init-config` creates `~/.j/config.json` with oMLX, DeepSeek, and Ollama
-profiles but no credentials. Export the selected profile's API-key environment
-variable, then use `j-tui --profile <name>` to switch profiles. See the
-[J-tui guide](J-tui/) for the complete configuration and security boundary.
+`--init-config` creates `~/.j/config.json` with a best-effort public oMLX
+profile selected by default, plus DeepSeek and Ollama alternatives. The default
+needs no credential; credentialed profiles use explicit `apiKey` values or
+environment references. Use `j-tui --profile <name>` to switch profiles. The
+public endpoint is rate limited and sends prompts to a project-operated host,
+so do not send secrets or private data. See the [J-tui guide](J-tui/) for the
+complete configuration and security boundary.
 
 The same typed file can explicitly configure stdio MCP servers and optional
 J-mem state. `j-tui --session <id>` restores and persists a configured

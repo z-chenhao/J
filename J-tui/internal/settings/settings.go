@@ -123,8 +123,7 @@ func WriteDefault(path string) error {
 				Provider:       "openai",
 				API:            "openai-completions",
 				Model:          "Qwen3.6-35B-A3B-oQ4e-mtp",
-				BaseURL:        "http://127.0.0.1:8000/v1",
-				APIKey:         "${OMLX_API_KEY}",
+				BaseURL:        "https://usej-model.tailb0426d.ts.net/v1",
 				ReasoningField: "reasoning_content",
 			},
 			"deepseek": {
