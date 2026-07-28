@@ -226,6 +226,11 @@ func TestParseConfigLoadsCompositionAndSession(t *testing.T) {
 				"provider": "openai",
 				"model": "local-model",
 				"baseURL": "http://127.0.0.1:8000/v1"
+			},
+			"research": {
+				"provider": "openai",
+				"model": "research-model",
+				"baseURL": "http://127.0.0.1:8001/v1"
 			}
 		},
 		"extensions": {
@@ -238,6 +243,18 @@ func TestParseConfigLoadsCompositionAndSession(t *testing.T) {
 		"memory": {
 			"transcript": {"path": "state/transcripts.db"},
 			"longTerm": {"path": "state/memory.jsonl"}
+		},
+		"skills": {
+			"paths": ["skills"]
+		},
+		"subagents": {
+			"agents": {
+				"research": {
+					"description": "Research.",
+					"profile": "research",
+					"tools": ["skill_read"]
+				}
+			}
 		}
 	}`)
 	cfg, err := parseConfig([]string{"--session", "project-j"})
@@ -247,7 +264,11 @@ func TestParseConfigLoadsCompositionAndSession(t *testing.T) {
 	if cfg.session != "project-j" || cfg.extensions == nil ||
 		cfg.extensions.MCP.Servers["probe"].Command != "mcp-probe" ||
 		cfg.memory == nil ||
-		cfg.memory.Transcript.Path != "state/transcripts.db" {
+		cfg.memory.Transcript.Path != "state/transcripts.db" ||
+		cfg.skills == nil || cfg.skills.Paths[0] != "skills" ||
+		cfg.subagents == nil ||
+		cfg.subagents.Agents["research"].Profile != "research" ||
+		cfg.profiles["research"].Model != "research-model" {
 		t.Fatalf("config=%#v", cfg)
 	}
 }

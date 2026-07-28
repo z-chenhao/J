@@ -4,6 +4,10 @@ updates:
   - package-ecosystem: gomod
     directories:
       - /J-agent
+      - /J-mcp
+      - /J-mem
+      - /J-skills
+      - /J-subagents
       - /J-tui
     schedule:
       interval: monthly

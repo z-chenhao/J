@@ -88,6 +88,60 @@ func TestLoadTypedMCPAndMemoryConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadTypedSkillsAndSubagentsConfiguration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, path, `{
+		"defaultProfile": "local",
+		"profiles": {
+			"local": {
+				"provider": "openai",
+				"model": "qwen",
+				"baseURL": "http://127.0.0.1:8000/v1"
+			},
+			"research": {
+				"provider": "openai",
+				"model": "research-model",
+				"baseURL": "http://127.0.0.1:8001/v1"
+			}
+		},
+		"skills": {
+			"paths": ["${HOME}/.agents/skills", "project-skills"]
+		},
+		"subagents": {
+			"agents": {
+				"research": {
+					"description": "Research one bounded question.",
+					"profile": "research",
+					"systemPrompt": "Return concise evidence.",
+					"tools": ["skill_read"]
+				},
+				"writer": {
+					"description": "Write without tools.",
+					"tools": []
+				}
+			}
+		}
+	}`)
+	file, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(file.Skills.Paths) != 2 ||
+		file.Skills.Paths[0] != "${HOME}/.agents/skills" {
+		t.Fatalf("skills=%#v", file.Skills)
+	}
+	research := file.Subagents.Agents["research"]
+	if research.Profile != "research" ||
+		research.SystemPrompt != "Return concise evidence." ||
+		len(research.Tools) != 1 || research.Tools[0] != "skill_read" {
+		t.Fatalf("research=%#v", research)
+	}
+	writer := file.Subagents.Agents["writer"]
+	if writer.Tools == nil || len(writer.Tools) != 0 {
+		t.Fatalf("writer tools=%#v", writer.Tools)
+	}
+}
+
 func TestLoadStreamableHTTPMCPConfiguration(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	writeTestFile(t, path, `{
@@ -237,6 +291,60 @@ func TestLoadRejectsInvalidMCPAndMemoryConfiguration(t *testing.T) {
 			"defaultProfile":"local",
 			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
 			"memory":{"longTerm":{"path":""}}
+		}`,
+	}
+	for name, contents := range tests {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			writeTestFile(t, path, contents)
+			if _, err := Load(path); err == nil {
+				t.Fatal("invalid configuration was accepted")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsInvalidSkillsAndSubagentsConfiguration(t *testing.T) {
+	tests := map[string]string{
+		"empty skill paths": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"skills":{"paths":[]}
+		}`,
+		"malformed skill environment reference": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"skills":{"paths":["${BAD"]}
+		}`,
+		"duplicate skill path": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"skills":{"paths":["skills","skills"]}
+		}`,
+		"empty subagents": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"subagents":{"agents":{}}
+		}`,
+		"blank subagent description": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"subagents":{"agents":{"research":{"description":" "}}}
+		}`,
+		"invalid subagent name": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"subagents":{"agents":{"bad name":{"description":"Research."}}}
+		}`,
+		"unknown subagent profile": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"subagents":{"agents":{"research":{"description":"Research.","profile":"missing"}}}
+		}`,
+		"duplicate subagent tool": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"subagents":{"agents":{"research":{"description":"Research.","tools":["bash","bash"]}}}
 		}`,
 	}
 	for name, contents := range tests {

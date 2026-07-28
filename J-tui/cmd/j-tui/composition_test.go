@@ -95,6 +95,179 @@ func TestComposeRuntimeLoadsMCPAndLongTermMemoryTools(t *testing.T) {
 	}
 }
 
+func TestComposeRuntimeLoadsSkillsAndRunsConfiguredSubagent(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".j", "config.json")
+	skillDirectory := filepath.Join(filepath.Dir(configPath), "skills", "research")
+	if err := os.MkdirAll(filepath.Join(skillDirectory, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(skillDirectory, "SKILL.md"),
+		[]byte("---\nname: research\ndescription: Research with evidence.\n---\n\n# Research\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(skillDirectory, "references", "guide.md"),
+		[]byte("evidence guide"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requests.Add(1)
+		if request.URL.Path != "/v1/chat/completions" {
+			t.Errorf("path=%q", request.URL.Path)
+		}
+		var payload struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		if len(payload.Messages) != 2 ||
+			payload.Messages[0].Role != "system" ||
+			payload.Messages[0].Content != "Return concise evidence." ||
+			payload.Messages[1].Content != "find evidence" {
+			t.Errorf("messages=%#v", payload.Messages)
+		}
+		if len(payload.Tools) != 1 ||
+			payload.Tools[0].Function.Name != "skill_read" {
+			t.Errorf("tools=%#v", payload.Tools)
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = writer.Write([]byte(
+			"data: " +
+				`{"id":"child-1","model":"child-model","choices":[{"delta":{"content":"child answer"},"finish_reason":"stop"}]}` +
+				"\n\n" +
+				"data: " +
+				`{"id":"child-1","model":"child-model","choices":[],"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}}` +
+				"\n\n" +
+				"data: [DONE]\n\n",
+		))
+	}))
+	defer server.Close()
+
+	composition, err := composeRuntime(context.Background(), config{
+		configPath:      configPath,
+		provider:        "openai",
+		api:             "openai-completions",
+		model:           "child-model",
+		baseURL:         server.URL + "/v1",
+		reasoningField:  "omit",
+		reasoningEffort: "default",
+		skills: &settings.Skills{
+			Paths: []string{"skills"},
+		},
+		subagents: &settings.Subagents{
+			Agents: map[string]settings.Subagent{
+				"research": {
+					Description:  "Research one bounded question.",
+					SystemPrompt: "Return concise evidence.",
+					Tools:        []string{"skill_read"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer composition.Close()
+
+	tools := make(map[string]agent.Tool, len(composition.tools))
+	for _, tool := range composition.tools {
+		tools[tool.Spec().Name] = tool
+	}
+	if len(tools) != 3 || tools["bash"] == nil ||
+		tools["skill_read"] == nil || tools["subagent_run"] == nil {
+		t.Fatalf("tools=%v", tools)
+	}
+	skillOutput, err := tools["skill_read"].Call(
+		context.Background(),
+		json.RawMessage(`{"name":"research","resource":"references/guide.md"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(skillOutput, "evidence guide") {
+		t.Fatalf("skill output=%q", skillOutput)
+	}
+	subagentOutput, err := tools["subagent_run"].Call(
+		context.Background(),
+		json.RawMessage(`{"agent":"research","task":"find evidence"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Content string       `json:"content"`
+		Usage   *agent.Usage `json:"usage"`
+	}
+	if err := json.Unmarshal([]byte(subagentOutput), &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Content != "child answer" || decoded.Usage == nil ||
+		decoded.Usage.TotalTokens != 10 || requests.Load() != 1 {
+		t.Fatalf("subagent output=%q requests=%d", subagentOutput, requests.Load())
+	}
+}
+
+func TestComposeRuntimeRejectsUnknownSubagentTool(t *testing.T) {
+	_, err := composeRuntime(context.Background(), config{
+		configPath:      filepath.Join(t.TempDir(), "config.json"),
+		provider:        "openai",
+		api:             "openai-completions",
+		model:           "test",
+		baseURL:         "http://127.0.0.1:1/v1",
+		reasoningField:  "omit",
+		reasoningEffort: "default",
+		subagents: &settings.Subagents{
+			Agents: map[string]settings.Subagent{
+				"research": {
+					Description: "Research.",
+					Tools:       []string{"missing"},
+				},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `"missing"`) ||
+		!strings.Contains(err.Error(), `"bash"`) {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestSelectSubagentToolsDistinguishesOmittedAndEmpty(t *testing.T) {
+	available := []agent.Tool{
+		namedTool{name: "one"},
+		namedTool{name: "two"},
+	}
+	inherited, err := selectSubagentTools("test", nil, available)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inherited) != 2 {
+		t.Fatalf("inherited=%d", len(inherited))
+	}
+	selected, err := selectSubagentTools("test", []string{}, available)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected == nil || len(selected) != 0 {
+		t.Fatalf("selected=%#v", selected)
+	}
+}
+
 func TestComposeRuntimeRejectsToolNameCollision(t *testing.T) {
 	t.Setenv("J_TUI_MCP_TEST_SERVER", "1")
 	t.Setenv("J_TUI_MCP_TOOL_NAME", "bash")
@@ -186,6 +359,49 @@ func TestComposeRuntimeRejectsUnknownConfiguredMCPTool(t *testing.T) {
 	}
 }
 
+func TestComposeRuntimeReportsMCPInitializationStderr(t *testing.T) {
+	t.Setenv("J_TUI_MCP_FAILURE_SERVER", "1")
+	_, err := composeRuntime(context.Background(), config{
+		configPath: filepath.Join(t.TempDir(), "config.json"),
+		extensions: &settings.Extensions{MCP: &settings.MCP{
+			Servers: map[string]settings.MCPServer{
+				"failure": {
+					Command: os.Args[0],
+					Args:    []string{"-test.run=^TestMCPStdioFailureHelper$"},
+					Env:     []string{"J_TUI_MCP_FAILURE_SERVER"},
+				},
+			},
+		}},
+	})
+	if err == nil ||
+		!strings.Contains(err.Error(), `start MCP server "failure"`) ||
+		!strings.Contains(err.Error(), "calling \"initialize\": EOF") ||
+		!strings.Contains(err.Error(), "configured filesystem root is not accessible") ||
+		strings.Contains(err.Error(), "\x1b") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestMCPStartupStderrIsBoundedAndStopsAfterInitialization(t *testing.T) {
+	capture := newMCPStartupStderr()
+	content := strings.Repeat("x", maxMCPStartupStderrBytes) + "tail"
+	if written, err := capture.Write([]byte(content)); err != nil || written != len(content) {
+		t.Fatalf("write=%d error=%v", written, err)
+	}
+	details := capture.stop()
+	if !strings.HasPrefix(details, "[stderr truncated to last 16 KiB]\n") ||
+		!strings.HasSuffix(details, "tail") ||
+		len(details) > maxMCPStartupStderrBytes+64 {
+		t.Fatalf("details length=%d prefix=%q", len(details), details[:min(len(details), 64)])
+	}
+	if _, err := capture.Write([]byte("runtime noise")); err != nil {
+		t.Fatal(err)
+	}
+	if details := capture.stop(); details != "" {
+		t.Fatalf("post-initialization stderr=%q", details)
+	}
+}
+
 func TestComposeRuntimeLoadsStreamableHTTPMCPWithConfiguredHeaders(t *testing.T) {
 	t.Setenv("REMOTE_MCP_TOKEN", "test-token")
 	server := mcpsdk.NewServer(&mcpsdk.Implementation{
@@ -254,6 +470,29 @@ func TestComposeRuntimeLoadsStreamableHTTPMCPWithConfiguredHeaders(t *testing.T)
 	}
 	if output != "remote-result" {
 		t.Fatalf("output=%q", output)
+	}
+}
+
+func TestMCPHTTPClientExtendsTLSHandshakeBudgetWithoutMutatingDefault(t *testing.T) {
+	defaultTransport := http.DefaultTransport.(*http.Transport)
+	defaultTimeout := defaultTransport.TLSHandshakeTimeout
+
+	client := newMCPHTTPClient(nil)
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("transport=%T", client.Transport)
+	}
+	if transport == defaultTransport {
+		t.Fatal("MCP HTTP client reused the mutable default transport")
+	}
+	if transport.TLSHandshakeTimeout != mcpTLSHandshakeTimeout {
+		t.Fatalf("TLS handshake timeout=%s", transport.TLSHandshakeTimeout)
+	}
+	if defaultTransport.TLSHandshakeTimeout != defaultTimeout {
+		t.Fatalf("default TLS handshake timeout=%s", defaultTransport.TLSHandshakeTimeout)
+	}
+	if client.CheckRedirect != nil {
+		t.Fatal("headerless MCP HTTP client changed default redirect behavior")
 	}
 }
 
@@ -418,6 +657,14 @@ func TestMCPStdioHelper(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestMCPStdioFailureHelper(t *testing.T) {
+	if os.Getenv("J_TUI_MCP_FAILURE_SERVER") != "1" {
+		return
+	}
+	_, _ = os.Stderr.WriteString("\x1b[31mconfigured filesystem root is not accessible\x1b[0m\n")
+	os.Exit(2)
+}
+
 func addMCPTestTool(server *mcpsdk.Server, name string) {
 	server.AddTool(&mcpsdk.Tool{
 		Name:        name,
@@ -469,4 +716,20 @@ func (model *mcpCallingModel) Complete(
 		Model:      "test",
 		StopReason: agent.StopReasonStop,
 	}, nil
+}
+
+type namedTool struct {
+	name string
+}
+
+func (tool namedTool) Spec() agent.ToolSpec {
+	return agent.ToolSpec{
+		Name:        tool.name,
+		Description: "Named test tool.",
+		InputSchema: json.RawMessage(`{"type":"object"}`),
+	}
+}
+
+func (namedTool) Call(context.Context, json.RawMessage) (string, error) {
+	return "ok", nil
 }

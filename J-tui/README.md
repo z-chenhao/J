@@ -140,11 +140,11 @@ The endpoint and model are opaque configuration. Azure mode appends
 uses the `api-key` header. It deliberately does not provide arbitrary headers,
 query parameters, or request-body configuration.
 
-## MCP and memory
+## MCP, memory, skills, and subagents
 
-J-tui can compose optional J-mcp and J-mem capabilities from the same typed
-configuration. Presence enables a capability; omission disables it. The
-starter configuration does not enable either one.
+J-tui can compose optional J-mcp, J-mem, J-skills, and J-subagents
+capabilities from the same typed configuration. Presence enables a capability;
+omission disables it. The starter configuration does not enable any of them.
 
 Add these top-level fields alongside `profiles`:
 
@@ -187,6 +187,29 @@ Add these top-level fields alongside `profiles`:
     },
     "longTerm": {
       "path": "state/memory.jsonl"
+    }
+  },
+  "skills": {
+    "paths": [
+      "${HOME}/.agents/skills",
+      "project-skills"
+    ]
+  },
+  "subagents": {
+    "agents": {
+      "research": {
+        "description": "Research one bounded question and return evidence.",
+        "profile": "deepseek",
+        "systemPrompt": "Work independently and return concise evidence.",
+        "tools": [
+          "skill_read",
+          "tavily_search"
+        ]
+      },
+      "writer": {
+        "description": "Draft text without external capabilities.",
+        "tools": []
+      }
     }
   }
 }
@@ -234,6 +257,30 @@ configuration file. With the default `~/.j/config.json`, the example memory
 files are therefore `~/.j/state/transcripts.db` and
 `~/.j/state/memory.jsonl`.
 
+Skill paths follow the same relative-path rule and also support the
+literal-plus-`${ENV_VAR}` value syntax. J-skills recursively discovers
+directories containing a standard `SKILL.md`, validates the Agent Skills
+frontmatter, and adds one `skill_read` Tool. Only names and descriptions are
+always visible to the model; complete instructions and relative resources load
+on demand. J-tui does not install skill packages, search implicit locations,
+execute scripts by itself, or interpret the experimental `allowed-tools`
+field.
+
+Each configured subagent becomes a selectable recipe behind one
+`subagent_run` Tool. `profile` optionally selects any named model profile and
+defaults to the parent invocation's effective model connection. Every call
+uses a fresh transcript, propagates cancellation, and returns final content,
+turn count, and provider-reported usage. The `tools` field is an exact,
+case-sensitive selection from Bash, memory, selected MCP tools, and
+`skill_read`: omitting it inherits all those non-subagent tools, while `[]`
+creates a model-only subagent. Unknown names fail startup.
+
+Subagents run in the foreground and calls using the same recipe are serialized.
+J-tui does not add a `J-delegate` layer, background jobs, parallel/chain
+orchestration, recursive tool inheritance, or subagent transcript persistence.
+Nested model usage remains visible in the `subagent_run` result; it is not
+misreported as usage of the parent model call.
+
 When `memory.transcript` is configured, every normal invocation creates a new
 session ID, writes an empty SQLite snapshot immediately, displays the ID in the
 TUI header, and persists the complete transcript after each successful run.
@@ -265,6 +312,16 @@ Tools remain frozen for that process. A startup failure or a selected-name
 collision with Bash, J-mem, or another MCP server fails explicitly. J-tui does
 not install MCP packages, sanitize tool names, retry servers, or silently omit
 failed capabilities.
+
+For a remote Streamable HTTP server, J-tui preserves Go's default proxy,
+connection-pooling, and certificate-verification behavior while allowing up to
+20 seconds for the TLS handshake. This fixed private startup policy avoids
+exposing a general network-tuning surface and does not retry failed requests.
+
+For a stdio server, J-tui captures at most the final 16 KiB of stderr while the
+MCP session initializes and includes it in an initialization error. After a
+successful initialization, further stderr is discarded so server logs cannot
+corrupt the full-screen TUI. MCP protocol stdout remains separate.
 
 ## Run from the repository
 
@@ -445,11 +502,12 @@ J-tui owns:
 - typed product configuration, session selection, and module composition;
 - UI-only status reduction and the experimental JSON projection.
 
-J-tui does not implement persistence, memory policy, MCP, model routing,
-plugin discovery, tool authorization, retry, or compaction. It composes the
-independent J-mem and J-mcp modules plus J-agent's ordinary first-party Bash
-Tool; no J-agent runtime API was added. The current event contract reports
-tool start and completion, not intermediate progress; J-tui does not invent
-progress that J-agent did not observe.
+J-tui does not implement persistence, memory policy, MCP, Agent Skills parsing,
+subagent execution, model routing, plugin discovery, tool authorization, retry,
+or compaction. It composes the independent J-mem, J-mcp, J-skills, and
+J-subagents modules plus J-agent's ordinary first-party Bash Tool; no J-agent
+runtime API was added. The current event contract reports tool start and
+completion, not intermediate progress; J-tui does not invent progress that
+J-agent did not observe.
 
 See [the repository design](../docs/design.md).

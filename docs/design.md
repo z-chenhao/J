@@ -3,7 +3,7 @@
 This is the single repository-level source for J's architecture, module
 ownership, extension strategy, and accumulated design conclusions.
 
-Last reviewed: 2026-07-27.
+Last reviewed: 2026-07-28.
 
 ## 1. Concrete goal
 
@@ -12,8 +12,9 @@ J explores one question:
 > What is the smallest truthful agent runtime that remains easy to customize?
 
 J is the umbrella repository. J-agent is its independently embeddable runtime
-kernel. J-tui, J-mcp, and J-mem are first-party consumers used to prove that
-the public seams are sufficient for real customization.
+kernel. J-tui, J-mcp, J-mem, J-skills, and J-subagents are first-party
+consumers used to prove that the public seams are sufficient for real
+customization.
 
 Current verified consumers of J-agent are its reference CLI, private JSONL
 runtime, J-tui, J-mcp, and J-mem. One OpenAI Provider exercises the model seam
@@ -21,7 +22,9 @@ through OpenAI-compatible and Azure OpenAI Chat Completions protocols; the
 backing servers do not count as independent `Model` implementations. J-tui
 consumes the public event and cancellation seams, J-mcp projects MCP tools
 through `agent.Tool`, and J-mem persists `History` and supplies four ordinary
-memory Tools without a runtime API change.
+memory Tools. J-skills projects standard capability resources through one Tool,
+and J-subagents constructs isolated child Agents behind another Tool, all
+without a runtime API change.
 
 ## 2. Engineering constitution
 
@@ -90,6 +93,8 @@ Primary sources:
 - [Pi settings](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/settings.md)
 - [Pi custom models](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/models.md)
 - [Pi subagent example](https://github.com/badlogic/pi-mono/blob/5bc1c2c0a6f07e00e8c240304182f213ab8d311f/packages/coding-agent/examples/extensions/subagent/index.ts)
+- [Pi skills](https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/skills.md)
+- [Agent Skills specification](https://agentskills.io/specification)
 
 The conclusion is not that J should copy Pi's entire mutable state or
 ExtensionAPI. Pi is a mature coding product; J-agent is intentionally only a
@@ -104,13 +109,16 @@ J/
 ├── J-tui/     terminal presentation and interaction
 ├── J-mcp/     MCP client lifecycle and Tool projection
 ├── J-mem/     local persistence and memory tools
+├── J-skills/  Agent Skills validation and progressive resource loading
+├── J-subagents/ isolated foreground child Agents projected as a Tool
 └── docs/      repository-level design decisions
 ```
 
 Dependency rules:
 
-- J-agent must not import J-tui, J-mcp, J-mem, or future J product modules.
-- J-tui, J-mcp, and J-mem may depend on J-agent's experimental public Go API.
+- J-agent must not import J-tui, J-mcp, J-mem, J-skills, J-subagents, or future
+  J product modules.
+- Sibling product modules may depend on J-agent's experimental public Go API.
 - Sibling modules must not own each other's policy.
 - Product entrypoints compose modules; the runtime does not discover them.
 - Component-specific protocol details remain inside the owning component.
@@ -282,6 +290,19 @@ HTTP/MCP headers remain closed. OAuth policy, command-based secret lookup,
 cached tool schemas, background daemons, and a J-specific transport interface
 remain unjustified.
 
+Real Tavily use exposed intermittent TLS handshakes beyond Go's ten-second
+default. J-tui therefore privately clones the default HTTP transport and
+extends only its TLS handshake budget to twenty seconds, preserving proxy,
+pooling, and certificate behavior. It does not expose network tuning or enable
+request retries; those remain unjustified without evidence that this bounded
+change is insufficient.
+
+Stdio startup diagnostics reuse J-mcp's existing stderr seam. J-tui privately
+captures a bounded tail during initialization, reports it only on failure, and
+discards runtime stderr rather than mixing server logs with MCP stdout, J-agent
+events, or terminal rendering. This does not add a logging contract to J-mcp or
+J-agent.
+
 The first implementation uses existing start/delta/completed events. Its
 private reducer maps them to `thinking`, `responding`, `tool`, `completed`,
 `failed`, and `canceled` display states. J-tui displays reasoning content by
@@ -373,6 +394,51 @@ Ambient retrieval or context injection should wait until the tool-based design
 proves insufficient. If required, a model wrapper should be tried before
 adding a runtime Hook.
 
+### J-skills
+
+J-skills is an independently usable consumer of the Agent Skills standard. Its
+concrete users are an embedding application that supplies explicit skill roots
+and J-tui's typed construction-time host. It recursively finds directories
+containing `SKILL.md`, validates required YAML metadata and standard naming
+rules, and exposes one `skill_read` Tool.
+
+The invariant mechanism is progressive disclosure: names and descriptions are
+part of the Tool contract at Agent construction, while the complete
+instructions and referenced files enter the transcript only when the model
+requests them. Resource reads are confined beneath the selected skill
+directory and bounded at 1 MiB. The common `{baseDir}` placeholder is replaced
+on read for compatibility with existing Pi skills.
+
+Discovery roots are explicit. J-skills does not choose global or project
+locations, install packages, run scripts, interpret the experimental
+`allowed-tools` field, or own trust policy. Those are host policies and remain
+unstabilized. Strict standard validation is preferable to silently changing
+skill identity; a future compatibility relaxation needs a real failing skill
+consumer.
+
+### J-subagents
+
+J-subagents proves that isolated child runs fit J-agent's existing Model and
+Tool seams. A host supplies named definitions containing a Model, optional
+system prompt, and exact Tools. The module returns one `subagent_run` Tool.
+Every call constructs a fresh Agent transcript, propagates the call context,
+and returns structured final content, turn count, and usage. Calls for one
+definition are serialized because `agent.Model` does not promise concurrent
+safety.
+
+J-tui is the first product host. Each recipe may select an existing model
+profile and an exact subset of the already composed non-subagent Tools.
+Omitting the tool list inherits that snapshot; an explicit empty list creates
+a model-only child. The subagent Tool is added last, so recursive delegation is
+not ambient.
+
+This design deliberately has no J-delegate intermediate and no J-agent
+`SubAgent` interface. Background jobs, parallel and chain orchestration,
+steering, child transcript persistence, worktrees, approval, recursive
+inheritance, and a universal registry remain outside the first version.
+Child-provider usage is returned in the Tool result rather than being
+misattributed to the parent model's `RunResult`.
+
 ## 8. Extension composition
 
 The current MCP requirement does not justify a universal Extension API.
@@ -387,12 +453,13 @@ deliberately narrow tool projection. It does not add a J-specific wire
 protocol: J-mcp speaks MCP directly. It also does not use Go runtime plugins,
 auto-discovery, runtime tool mutation, or generic configuration payloads.
 
-J-mem provides another meaningfully different Tool-producing module, plus a
-transcript lifecycle before and after Agent runs. J-tui composes those
-capabilities through a separate typed `memory` section rather than pretending
-they share MCP's connection lifecycle. That difference is evidence against
-extracting a common lifecycle prematurely. `Extension`, `Plugin`, and `MCP`
-therefore remain absent from J-agent.
+J-mem, J-skills, and J-subagents provide meaningfully different
+Tool-producing modules. J-mem also owns transcript lifecycle, J-skills owns
+resource discovery, and J-subagents consumes Model plus Tool recipes. J-tui
+therefore composes them through separate typed sections rather than pretending
+they share MCP's connection lifecycle. These differences are evidence against
+extracting a common lifecycle prematurely. `Extension`, `Plugin`, `Skill`,
+`SubAgent`, and `MCP` remain absent from J-agent.
 
 ## 9. Planned external modules
 
@@ -400,9 +467,9 @@ These names describe product modules, not promised J-agent interfaces:
 
 | Module | Initial composition strategy |
 | --- | --- |
-| J-agent-swarm | Child J-agent instances exposed to the parent as delegation tools |
 | J-mcp | Implemented independent bridge; map MCP tools to `agent.Tool`; own connection lifecycle |
-| J-skills | Parse skill resources into prompt/tool recipes outside the runtime |
+| J-skills | Implemented standard skill discovery and progressive resource Tool |
+| J-subagents | Implemented foreground isolated child Agents behind one Tool |
 | J-plugins | Own discovery, trust, installation, and composition |
 | J-gateway | Map platform chat identity to external Agent/session ownership |
 
@@ -461,7 +528,11 @@ Potential future mechanisms must be validated in this order:
 - Public APIs remain experimental before independent production consumers.
 - Extension hosting remains product-owned construction-time composition;
   J-agent does not discover or load extensions.
-- J-mcp and J-mem are independent Go modules; neither depends on J-tui.
+- J-mcp, J-mem, J-skills, and J-subagents are independent Go modules; none
+  depends on J-tui.
+- J-skills implements the external Agent Skills format without moving Skill
+  semantics into J-agent.
+- J-subagents is the direct subagent module; J-delegate does not exist.
 
 ## 12. Minimal development order
 
@@ -474,9 +545,12 @@ Potential future mechanisms must be validated in this order:
    tests passing.
 5. Keep J-mem's SQLite transcript round-trip and four JSONL memory Tools
    passing through J-tui's separate memory lifecycle.
-6. Validate provider-backed MCP calls as operational smoke tests without a
-   J-agent API change.
-7. Re-audit actual integration friction before changing J-agent.
-8. Prototype subagent-as-tool.
-9. Design skill/plugin distribution only after at least two resource types
+6. Keep J-skills standard validation, bounded resource confinement, and
+   progressive Tool loading passing.
+7. Keep J-subagents' fresh transcript, explicit capability selection,
+   cancellation, and provider usage result passing.
+8. Validate provider-backed MCP and subagent calls as operational smoke tests
+   without a J-agent API change.
+9. Re-audit actual integration friction before changing J-agent.
+10. Design skill/plugin distribution only after at least two resource types
    need common discovery and trust semantics.

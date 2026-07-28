@@ -40,8 +40,11 @@ type config struct {
 	reasoningEffort string
 	session         string
 	noSession       bool
+	profiles        map[string]settings.Profile
 	extensions      *settings.Extensions
 	memory          *settings.Memory
+	skills          *settings.Skills
+	subagents       *settings.Subagents
 	prompts         []string
 }
 
@@ -265,8 +268,11 @@ func parseConfig(args []string) (config, error) {
 		cfg.apiKey = profile.APIKey
 		cfg.reasoningField = profile.ReasoningField
 		cfg.reasoningEffort = profile.ReasoningEffort
+		cfg.profiles = file.Profiles
 		cfg.extensions = file.Extensions
 		cfg.memory = file.Memory
+		cfg.skills = file.Skills
+		cfg.subagents = file.Subagents
 		apiKeySpecified = true
 	}
 	applyEnvironment(&cfg, &apiKeySpecified)
@@ -510,6 +516,66 @@ func buildModel(cfg config) (agent.Model, error) {
 		ReasoningField:  parseReasoningField(cfg.reasoningField),
 		ReasoningEffort: openai.ReasoningEffort(cfg.reasoningEffortValue()),
 	})
+}
+
+func buildProfileModel(name string, profile settings.Profile) (agent.Model, error) {
+	cfg := config{
+		profile:         name,
+		provider:        strings.ToLower(strings.TrimSpace(profile.Provider)),
+		api:             strings.ToLower(strings.TrimSpace(profile.API)),
+		apiVersion:      strings.TrimSpace(profile.APIVersion),
+		model:           strings.TrimSpace(profile.Model),
+		baseURL:         strings.TrimSpace(profile.BaseURL),
+		apiKey:          profile.APIKey,
+		reasoningField:  strings.ToLower(strings.TrimSpace(profile.ReasoningField)),
+		reasoningEffort: strings.ToLower(strings.TrimSpace(profile.ReasoningEffort)),
+	}
+	if cfg.api == "" {
+		cfg.api = string(openai.APICompletions)
+	}
+	if cfg.reasoningField == "" {
+		cfg.reasoningField = "omit"
+	}
+	if cfg.reasoningEffort == "" {
+		cfg.reasoningEffort = "default"
+	}
+	if cfg.provider != "openai" {
+		return nil, fmt.Errorf("profile %q uses unsupported provider %q", name, cfg.provider)
+	}
+	switch openai.API(cfg.api) {
+	case openai.APICompletions:
+		if cfg.apiVersion != "" {
+			return nil, fmt.Errorf(
+				"profile %q openai-completions does not use apiVersion",
+				name,
+			)
+		}
+	case openai.APIAzureCompletions:
+		if cfg.apiVersion == "" {
+			return nil, fmt.Errorf("profile %q Azure OpenAI API version is required", name)
+		}
+	default:
+		return nil, fmt.Errorf("profile %q uses unsupported provider API %q", name, cfg.api)
+	}
+	switch cfg.reasoningField {
+	case "omit", "reasoning_content", "reasoning":
+	default:
+		return nil, fmt.Errorf(
+			"profile %q uses unsupported reasoning field %q",
+			name,
+			cfg.reasoningField,
+		)
+	}
+	switch cfg.reasoningEffort {
+	case "default", "none", "low", "medium", "high", "max":
+	default:
+		return nil, fmt.Errorf(
+			"profile %q uses unsupported reasoning effort %q",
+			name,
+			cfg.reasoningEffort,
+		)
+	}
+	return buildModel(cfg)
 }
 
 func (cfg config) reasoningEffortValue() string {

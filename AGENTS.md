@@ -10,11 +10,12 @@ J is a repository of small, composable agent projects.
 - `J-tui` is a terminal consumer of J-agent.
 - `J-mcp` projects MCP servers into ordinary J-agent tools.
 - `J-mem` is optional local transcript and long-term memory.
+- `J-skills` loads standard Agent Skills progressively.
+- `J-subagents` runs isolated foreground child Agents through a tool.
 
-J-agent must not depend on sibling product modules. J-tui and J-mem validate the
-same public seams available to external consumers, while J-mcp validates the
-tool seam as an independent bridge. They are examples, not privileged framework
-layers.
+J-agent must not depend on sibling product modules. The siblings validate the
+same public seams available to external consumers. They are examples, not
+privileged framework layers.
 
 Repository-level architecture and accumulated decisions live in
 `docs/design.md`. Component protocol details stay with the component that owns

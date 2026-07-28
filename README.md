@@ -11,10 +11,12 @@ The repository currently contains:
 | [`J-tui`](J-tui/) | Minimal terminal interface and JSON event trace | Implemented, experimental |
 | [`J-mcp`](J-mcp/) | MCP server tools projected into J-agent | Implemented, experimental |
 | [`J-mem`](J-mem/) | SQLite transcripts and JSONL long-term memory | Implemented, experimental |
+| [`J-skills`](J-skills/) | Standard Agent Skills discovery and progressive loading | Implemented, experimental |
+| [`J-subagents`](J-subagents/) | Isolated foreground subagents exposed as one Tool | Implemented, experimental |
 
-J-agent remains independently embeddable. J-tui, J-mcp, and J-mem are
-first-party examples of customization, not privileged runtime layers. Each can
-be replaced or omitted by an embedding application.
+J-agent remains independently embeddable. Every sibling is a first-party
+example of customization, not a privileged runtime layer. Each can be replaced
+or omitted by an embedding application.
 
 ## Install J-tui
 
@@ -46,10 +48,11 @@ public endpoint is rate limited and sends prompts to a project-operated host,
 so do not send secrets or private data. See the [J-tui guide](J-tui/) for the
 complete configuration and security boundary.
 
-The same typed file can explicitly configure stdio MCP servers and optional
-J-mem state. `j-tui --session <id>` restores and persists a configured
-transcript, while long-term memory remains four ordinary model-visible Tools.
-Omitting either configuration keeps that module disabled.
+The same typed file can explicitly configure stdio or HTTP MCP servers,
+J-mem state, Agent Skills roots, and isolated foreground subagents.
+`j-tui --session <id>` restores and persists a configured transcript, while
+long-term memory, skills, MCP, and subagents remain ordinary model-visible
+Tools. Omitting a section keeps that module disabled.
 
 J-tui enables the first-party Bash Tool. A direct host installation therefore
 runs model-requested commands with the permissions of the `j-tui` process. Use
@@ -68,7 +71,7 @@ them, for example [`J-agent/docs`](J-agent/docs/).
 
 ## Build
 
-Run checks for all four modules from the repository root:
+Run checks for all six modules from the repository root:
 
 ```bash
 make check
@@ -95,7 +98,7 @@ docker run --rm -i \
   --provider openai \
   --model deepseek-v4-flash \
   --base-url https://api.deepseek.com \
-  --api-key-env DEEPSEEK_API_KEY \
+  --api-key '${DEEPSEEK_API_KEY}' \
   --reasoning-field reasoning_content \
   "Use bash to print the working directory."
 ```

@@ -28,6 +28,8 @@ jobs:
           (cd J-agent && govulncheck ./...)
           (cd J-mcp && govulncheck ./...)
           (cd J-mem && govulncheck ./...)
+          (cd J-skills && govulncheck ./...)
+          (cd J-subagents && govulncheck ./...)
           (cd J-tui && govulncheck ./...)
 
   container:

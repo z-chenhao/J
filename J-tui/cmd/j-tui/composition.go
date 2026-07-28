@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/z-chenhao/J/J-agent/agent"
@@ -17,10 +19,16 @@ import (
 	jmcp "github.com/z-chenhao/J/J-mcp"
 	"github.com/z-chenhao/J/J-mem/memory"
 	"github.com/z-chenhao/J/J-mem/transcript"
+	jskills "github.com/z-chenhao/J/J-skills"
+	jsubagents "github.com/z-chenhao/J/J-subagents"
 	"github.com/z-chenhao/J/J-tui/internal/settings"
 )
 
-const mcpShutdownTimeout = 5 * time.Second
+const (
+	mcpShutdownTimeout       = 5 * time.Second
+	mcpTLSHandshakeTimeout   = 20 * time.Second
+	maxMCPStartupStderrBytes = 16 << 10
+)
 
 type conversationRunner interface {
 	Run(context.Context, string, agent.EventHandler) (agent.RunResult, error)
@@ -38,6 +46,60 @@ type mcpToolObservation struct {
 	Server   string
 	Name     string
 	Selected bool
+}
+
+type mcpStartupStderr struct {
+	mu        sync.Mutex
+	content   []byte
+	active    bool
+	truncated bool
+}
+
+func newMCPStartupStderr() *mcpStartupStderr {
+	return &mcpStartupStderr{active: true}
+}
+
+func (capture *mcpStartupStderr) Write(content []byte) (int, error) {
+	written := len(content)
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	if !capture.active || written == 0 {
+		return written, nil
+	}
+	if written >= maxMCPStartupStderrBytes {
+		capture.content = append(
+			capture.content[:0],
+			content[written-maxMCPStartupStderrBytes:]...,
+		)
+		capture.truncated = true
+		return written, nil
+	}
+	overflow := len(capture.content) + written - maxMCPStartupStderrBytes
+	if overflow > 0 {
+		copy(capture.content, capture.content[overflow:])
+		capture.content = capture.content[:len(capture.content)-overflow]
+		capture.truncated = true
+	}
+	capture.content = append(capture.content, content...)
+	return written, nil
+}
+
+func (capture *mcpStartupStderr) stop() string {
+	capture.mu.Lock()
+	defer capture.mu.Unlock()
+	capture.active = false
+	details := strings.TrimSpace(string(capture.content))
+	capture.content = nil
+	details = strings.Map(func(character rune) rune {
+		if character == '\n' || character == '\t' || !unicode.IsControl(character) {
+			return character
+		}
+		return '\uFFFD'
+	}, details)
+	if details != "" && capture.truncated {
+		details = "[stderr truncated to last 16 KiB]\n" + details
+	}
+	return details
 }
 
 func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error) {
@@ -99,6 +161,46 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		}
 	}
 
+	if !cfg.listTools && cfg.skills != nil {
+		paths := make([]string, 0, len(cfg.skills.Paths))
+		for _, configuredPath := range cfg.skills.Paths {
+			resolved, err := settings.ResolveValue(configuredPath, os.LookupEnv)
+			if err != nil {
+				return nil, fmt.Errorf("resolve skill path %q: %w", configuredPath, err)
+			}
+			paths = append(paths, resolveStatePath(cfg.configPath, resolved))
+		}
+		catalog, err := jskills.Load(paths...)
+		if err != nil {
+			return nil, fmt.Errorf("initialize skills: %w", err)
+		}
+		skillTool, err := catalog.Tool()
+		if err != nil {
+			return nil, fmt.Errorf("initialize skills tool: %w", err)
+		}
+		if err := composition.addTools(names, "J-skills", skillTool); err != nil {
+			return nil, err
+		}
+	}
+
+	if !cfg.listTools && cfg.subagents != nil {
+		definitions, err := buildSubagentDefinitions(cfg, composition.tools)
+		if err != nil {
+			return nil, err
+		}
+		subagentTool, err := jsubagents.NewTool(definitions...)
+		if err != nil {
+			return nil, fmt.Errorf("initialize subagents: %w", err)
+		}
+		if err := composition.addTools(
+			names,
+			"J-subagents",
+			subagentTool,
+		); err != nil {
+			return nil, err
+		}
+	}
+
 	if !cfg.listTools && cfg.session != "" {
 		if cfg.memory == nil || cfg.memory.Transcript == nil {
 			return nil, errors.New("transcript session requires memory.transcript")
@@ -136,37 +238,53 @@ func connectMCPServer(
 		if err != nil {
 			return nil, err
 		}
-		return jmcp.DialStdio(ctx, jmcp.StdioConfig{
+		stderr := newMCPStartupStderr()
+		connection, err := jmcp.DialStdio(ctx, jmcp.StdioConfig{
 			Command:         server.Command,
 			Args:            append([]string(nil), server.Args...),
 			Dir:             resolveOptionalPath(configPath, server.CWD),
 			Env:             environment,
+			Stderr:          stderr,
 			ShutdownTimeout: mcpShutdownTimeout,
 		})
+		details := stderr.stop()
+		if err != nil && details != "" {
+			return nil, fmt.Errorf("%w\nMCP server stderr:\n%s", err, details)
+		}
+		return connection, err
 	}
 
-	var client *http.Client
+	var headers http.Header
 	if len(server.Headers) > 0 {
-		headers, err := resolveHTTPHeaders(server.Headers)
+		var err error
+		headers, err = resolveHTTPHeaders(server.Headers)
 		if err != nil {
 			return nil, err
-		}
-		client = &http.Client{
-			Transport: headerTransport{
-				base:    http.DefaultTransport,
-				headers: headers,
-			},
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return http.ErrUseLastResponse
-			},
 		}
 	}
 	return jmcp.Connect(ctx, &mcpsdk.StreamableClientTransport{
 		Endpoint:             server.URL,
-		HTTPClient:           client,
+		HTTPClient:           newMCPHTTPClient(headers),
 		MaxRetries:           -1,
 		DisableStandaloneSSE: true,
 	})
+}
+
+func newMCPHTTPClient(headers http.Header) *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSHandshakeTimeout = mcpTLSHandshakeTimeout
+	var roundTripper http.RoundTripper = transport
+	client := &http.Client{Transport: roundTripper}
+	if len(headers) > 0 {
+		client.Transport = headerTransport{
+			base:    transport,
+			headers: headers,
+		}
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return client
 }
 
 func resolveHTTPHeaders(configured map[string]string) (http.Header, error) {
@@ -267,6 +385,91 @@ func selectMCPTools(
 		}
 	}
 	return selected, observations, nil
+}
+
+func buildSubagentDefinitions(
+	cfg config,
+	availableTools []agent.Tool,
+) ([]jsubagents.Definition, error) {
+	names := make([]string, 0, len(cfg.subagents.Agents))
+	for name := range cfg.subagents.Agents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	definitions := make([]jsubagents.Definition, 0, len(names))
+	for _, name := range names {
+		configured := cfg.subagents.Agents[name]
+		var (
+			model agent.Model
+			err   error
+		)
+		if configured.Profile == "" {
+			model, err = buildModel(cfg)
+		} else {
+			profile, exists := cfg.profiles[configured.Profile]
+			if !exists {
+				return nil, fmt.Errorf(
+					"subagent %q profile %q is not defined",
+					name,
+					configured.Profile,
+				)
+			}
+			model, err = buildProfileModel(configured.Profile, profile)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("initialize subagent %q model: %w", name, err)
+		}
+		tools, err := selectSubagentTools(name, configured.Tools, availableTools)
+		if err != nil {
+			return nil, err
+		}
+		definitions = append(definitions, jsubagents.Definition{
+			Name:         name,
+			Description:  configured.Description,
+			Model:        model,
+			SystemPrompt: configured.SystemPrompt,
+			Tools:        tools,
+		})
+	}
+	return definitions, nil
+}
+
+func selectSubagentTools(
+	subagentName string,
+	allowlist []string,
+	availableTools []agent.Tool,
+) ([]agent.Tool, error) {
+	if allowlist == nil {
+		return append([]agent.Tool(nil), availableTools...), nil
+	}
+	available := make(map[string]agent.Tool, len(availableTools))
+	availableNames := make([]string, 0, len(availableTools))
+	for _, tool := range availableTools {
+		name := tool.Spec().Name
+		available[name] = tool
+		availableNames = append(availableNames, name)
+	}
+	selected := make([]agent.Tool, 0, len(allowlist))
+	missing := make([]string, 0)
+	for _, name := range allowlist {
+		tool, exists := available[name]
+		if !exists {
+			missing = append(missing, name)
+			continue
+		}
+		selected = append(selected, tool)
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		sort.Strings(availableNames)
+		return nil, fmt.Errorf(
+			"subagent %q configured unknown tools %q; available tools: %q",
+			subagentName,
+			missing,
+			availableNames,
+		)
+	}
+	return selected, nil
 }
 
 func (composition *runtimeComposition) addTools(

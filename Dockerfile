@@ -6,16 +6,22 @@ COPY go.work ./
 COPY J-agent/go.mod J-agent/go.mod
 COPY J-mcp/go.mod J-mcp/go.sum J-mcp/
 COPY J-mem/go.mod J-mem/go.sum J-mem/
+COPY J-skills/go.mod J-skills/go.sum J-skills/
+COPY J-subagents/go.mod J-subagents/
 COPY J-tui/go.mod J-tui/go.sum J-tui/
 
 RUN cd J-agent && go mod download
 RUN cd J-mcp && go mod download
 RUN cd J-mem && go mod download
+RUN cd J-skills && go mod download
+RUN cd J-subagents && go mod download
 RUN cd J-tui && go mod download
 
 COPY J-agent J-agent
 COPY J-mcp J-mcp
 COPY J-mem J-mem
+COPY J-skills J-skills
+COPY J-subagents J-subagents
 COPY J-tui J-tui
 
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/j-agent ./J-agent/cmd/j-agent

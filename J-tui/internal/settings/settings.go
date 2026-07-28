@@ -21,6 +21,8 @@ type File struct {
 	Profiles       map[string]Profile `json:"profiles"`
 	Extensions     *Extensions        `json:"extensions,omitempty"`
 	Memory         *Memory            `json:"memory,omitempty"`
+	Skills         *Skills            `json:"skills,omitempty"`
+	Subagents      *Subagents         `json:"subagents,omitempty"`
 }
 
 // Profile describes one concrete model connection.
@@ -67,6 +69,26 @@ type Memory struct {
 // directory containing the J-tui configuration file.
 type MemoryFile struct {
 	Path string `json:"path"`
+}
+
+// Skills describes explicitly configured Agent Skills roots.
+type Skills struct {
+	Paths []string `json:"paths"`
+}
+
+// Subagents contains J-tui's explicitly named foreground subagent recipes.
+type Subagents struct {
+	Agents map[string]Subagent `json:"agents"`
+}
+
+// Subagent selects one model profile, optional system prompt, and exact Tool
+// set. An omitted Tools field inherits all non-subagent tools; an empty array
+// selects none.
+type Subagent struct {
+	Description  string   `json:"description"`
+	Profile      string   `json:"profile,omitempty"`
+	SystemPrompt string   `json:"systemPrompt,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
 }
 
 // DefaultPath returns J-tui's user-scoped configuration path.
@@ -234,6 +256,12 @@ func (file File) validate() error {
 		return err
 	}
 	if err := file.Memory.validate(); err != nil {
+		return err
+	}
+	if err := file.Skills.validate(); err != nil {
+		return err
+	}
+	if err := file.Subagents.validate(file.Profiles); err != nil {
 		return err
 	}
 	return nil
@@ -485,4 +513,109 @@ func (memory *Memory) validate() error {
 		}
 	}
 	return nil
+}
+
+func (skills *Skills) validate() error {
+	if skills == nil {
+		return nil
+	}
+	if len(skills.Paths) == 0 {
+		return errors.New("skills.paths must contain at least one path")
+	}
+	seen := make(map[string]struct{}, len(skills.Paths))
+	for _, path := range skills.Paths {
+		if path == "" || path != strings.TrimSpace(path) {
+			return fmt.Errorf("skill path %q must be non-empty and trimmed", path)
+		}
+		if err := ValidateValue(path); err != nil {
+			return fmt.Errorf("skill path %q: %w", path, err)
+		}
+		if _, exists := seen[path]; exists {
+			return fmt.Errorf("skills repeats path %q", path)
+		}
+		seen[path] = struct{}{}
+	}
+	return nil
+}
+
+func (subagents *Subagents) validate(profiles map[string]Profile) error {
+	if subagents == nil {
+		return nil
+	}
+	if len(subagents.Agents) == 0 {
+		return errors.New("subagents.agents must configure at least one agent")
+	}
+	for name, configured := range subagents.Agents {
+		if name == "" || name != strings.TrimSpace(name) {
+			return fmt.Errorf("subagent name %q must be non-empty and trimmed", name)
+		}
+		if !validSubagentName(name) {
+			return fmt.Errorf(
+				"subagent name %q must start with an ASCII letter or digit and contain only letters, digits, '.', '_', and '-'",
+				name,
+			)
+		}
+		if configured.Description == "" ||
+			configured.Description != strings.TrimSpace(configured.Description) {
+			return fmt.Errorf(
+				"subagent %q description must be non-empty and trimmed",
+				name,
+			)
+		}
+		if len([]rune(name)) > 64 {
+			return fmt.Errorf("subagent name %q exceeds 64 characters", name)
+		}
+		if len([]rune(configured.Description)) > 1024 {
+			return fmt.Errorf("subagent %q description exceeds 1024 characters", name)
+		}
+		if configured.Profile != strings.TrimSpace(configured.Profile) {
+			return fmt.Errorf("subagent %q profile must be trimmed", name)
+		}
+		if configured.Profile != "" {
+			if _, exists := profiles[configured.Profile]; !exists {
+				return fmt.Errorf(
+					"subagent %q profile %q is not defined",
+					name,
+					configured.Profile,
+				)
+			}
+		}
+		if configured.SystemPrompt != strings.TrimSpace(configured.SystemPrompt) {
+			return fmt.Errorf("subagent %q systemPrompt must be trimmed", name)
+		}
+		seenTools := make(map[string]struct{}, len(configured.Tools))
+		for _, tool := range configured.Tools {
+			if tool == "" || tool != strings.TrimSpace(tool) {
+				return fmt.Errorf(
+					"subagent %q tool name %q must be non-empty and trimmed",
+					name,
+					tool,
+				)
+			}
+			if _, exists := seenTools[tool]; exists {
+				return fmt.Errorf("subagent %q repeats tool name %q", name, tool)
+			}
+			seenTools[tool] = struct{}{}
+		}
+	}
+	return nil
+}
+
+func validSubagentName(name string) bool {
+	if name == "" || len([]rune(name)) > 64 {
+		return false
+	}
+	for index := 0; index < len(name); index++ {
+		character := name[index]
+		alphanumeric := character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9'
+		if index == 0 && !alphanumeric {
+			return false
+		}
+		if !alphanumeric && !strings.ContainsRune("._-", rune(character)) {
+			return false
+		}
+	}
+	return true
 }

@@ -15,6 +15,12 @@ not define a universal Extension Go interface or another wire protocol. J-mcp
 speaks MCP directly and privately maps discovered tools to J-agent's existing
 `Tool` seam.
 
+J-mem, J-skills, and J-subagents now validate the same construction-time Tool
+composition while also proving that their lifecycles differ. J-tui keeps them
+in separate typed `memory`, `skills`, and `subagents` sections rather than
+widening this MCP-specific protocol into a generic loader. They do not justify
+an `Extension` interface.
+
 ## Concrete requirement and consumers
 
 The current requirement is:
