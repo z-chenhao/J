@@ -107,6 +107,26 @@ enough to construct the replay input. The public artifact stores event kinds,
 timings, usage, token labels, and J-lens readouts. Pass
 `--retain-transcript` only for an explicitly private experiment.
 
+## Remote J-tui capture
+
+An explicitly configured J-tui can submit one completed root Agent run to:
+
+```text
+POST /jspace/api/captures
+```
+
+The endpoint uses a separate mode-0600 token at
+`~/.j/jspace/capture-token`. It does not accept the viewer token. The gateway
+bounds and validates the request, persists it in the private
+`~/.j/jspace/inbox/` queue, and returns `202` before the single local replay
+worker loads MLX. The viewer therefore observes `probing` before `completed`
+or an explicit `partial` result.
+
+Remote raw frames are deleted from the inbox after either result. They are
+never added to the public artifact. A process restart resumes private inbox
+files, and the remote J-tui retains failed deliveries in its own mode-0600
+outbox for retry.
+
 ## Public read-only viewer
 
 The repository includes `jspace-gateway`, a narrow reverse proxy intended for

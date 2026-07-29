@@ -54,6 +54,7 @@ type AgentEvent struct {
 	Sequence    int64          `json:"sequence"`
 	OffsetMS    int64          `json:"offsetMs"`
 	Type        string         `json:"type"`
+	Subagent    string         `json:"subagent,omitempty"`
 	DurationMS  *int64         `json:"durationMs,omitempty"`
 	IsError     bool           `json:"isError,omitempty"`
 	Tool        string         `json:"tool,omitempty"`

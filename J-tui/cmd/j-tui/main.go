@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"strings"
 	"syscall"
@@ -49,8 +50,12 @@ type config struct {
 	memory          *settings.Memory
 	skills          *settings.Skills
 	subagents       *settings.Subagents
+	jspaceURL       string
+	jspaceToken     string
 	prompts         []string
 }
+
+var version = "dev"
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -62,6 +67,10 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
+	if len(args) == 1 && args[0] == "--version" {
+		_, err := fmt.Fprintf(out, "j-tui %s\n", version)
+		return err
+	}
 	cfg, err := parseConfig(args)
 	if err != nil {
 		return err
@@ -110,6 +119,11 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 	if err != nil {
 		return err
 	}
+	var capturedModel *jspaceModel
+	if cfg.jspaceURL != "" {
+		capturedModel = &jspaceModel{inner: model}
+		model = capturedModel
+	}
 	composition, err := composeRuntime(ctx, cfg)
 	if err != nil {
 		return err
@@ -133,6 +147,31 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 			history:   agentRunner.History,
 			store:     composition.transcripts,
 			sessionID: cfg.session,
+		}
+	}
+	if capturedModel != nil {
+		token, err := settings.ResolveValue(cfg.jspaceToken, os.LookupEnv)
+		if err != nil {
+			return fmt.Errorf("resolve J-Space capture token: %w", err)
+		}
+		sink, err := newJSpaceSink(
+			cfg.jspaceURL,
+			token,
+			filepath.Join(filepath.Dir(cfg.configPath), "jspace-outbox"),
+		)
+		if err != nil {
+			return err
+		}
+		label := "J-tui remote run"
+		if cfg.profile != "" {
+			label = "J-tui · " + cfg.profile
+		}
+		runner = &jspaceRunner{
+			runner:  runner,
+			model:   capturedModel,
+			sink:    sink,
+			label:   label,
+			modelID: cfg.model,
 		}
 	}
 
@@ -199,6 +238,18 @@ func parseConfig(args []string) (config, error) {
 		"api-key",
 		"",
 		"provider API key value; supports ${ENV_VAR} references",
+	)
+	flags.StringVar(
+		&values.jspaceURL,
+		"jspace-url",
+		"",
+		"authenticated J-Space capture endpoint",
+	)
+	flags.StringVar(
+		&values.jspaceToken,
+		"jspace-token",
+		"",
+		"J-Space capture token value; supports ${ENV_VAR} references",
 	)
 	flags.StringVar(
 		&values.reasoningField,
@@ -314,6 +365,10 @@ func parseConfig(args []string) (config, error) {
 		cfg.memory = file.Memory
 		cfg.skills = file.Skills
 		cfg.subagents = file.Subagents
+		if file.JSpace != nil {
+			cfg.jspaceURL = file.JSpace.URL
+			cfg.jspaceToken = file.JSpace.CaptureToken
+		}
 		apiKeySpecified = true
 	}
 	applyEnvironment(&cfg, &apiKeySpecified)
@@ -329,6 +384,8 @@ func parseConfig(args []string) (config, error) {
 	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
 	cfg.session = strings.TrimSpace(cfg.session)
+	cfg.jspaceURL = strings.TrimSpace(cfg.jspaceURL)
+	cfg.jspaceToken = strings.TrimSpace(cfg.jspaceToken)
 	auditModes := 0
 	for _, enabled := range []bool{cfg.listTools, cfg.listSkills, cfg.checkSkills} {
 		if enabled {
@@ -380,6 +437,14 @@ func parseConfig(args []string) (config, error) {
 	}
 	if err := settings.ValidateValue(cfg.apiKey); err != nil {
 		return config{}, fmt.Errorf("provider API key: %w", err)
+	}
+	if err := settings.ValidateValue(cfg.jspaceToken); err != nil {
+		return config{}, fmt.Errorf("J-Space capture token: %w", err)
+	}
+	if (cfg.jspaceURL == "") != (cfg.jspaceToken == "") {
+		return config{}, errors.New(
+			"J-Space capture requires both URL and token",
+		)
 	}
 	if cfg.reasoningField == "" {
 		cfg.reasoningField = "omit"
@@ -515,6 +580,8 @@ func applyEnvironment(cfg *config, apiKeySpecified *bool) {
 		"J_TUI_REASONING_FIELD":  &cfg.reasoningField,
 		"J_TUI_REASONING_EFFORT": &cfg.reasoningEffort,
 		"J_TUI_SESSION":          &cfg.session,
+		"J_TUI_JSPACE_URL":       &cfg.jspaceURL,
+		"J_TUI_JSPACE_TOKEN":     &cfg.jspaceToken,
 	} {
 		if value := env(name); value != "" {
 			*target = value
@@ -545,6 +612,8 @@ func applyFlags(
 		"reasoning-field":  {&cfg.reasoningField, values.reasoningField},
 		"reasoning-effort": {&cfg.reasoningEffort, values.reasoningEffort},
 		"session":          {&cfg.session, values.session},
+		"jspace-url":       {&cfg.jspaceURL, values.jspaceURL},
+		"jspace-token":     {&cfg.jspaceToken, values.jspaceToken},
 	} {
 		if visited[name] {
 			*pair.target = pair.value

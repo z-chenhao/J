@@ -1,6 +1,7 @@
 BIN_DIR := bin
 
 OMLX_PYTHON ?= /opt/homebrew/opt/omlx/libexec/bin/python3.11
+PYTHON ?= python3
 
 .PHONY: build check test race fmt-check vet python-test fetch-lens clean
 
@@ -12,7 +13,7 @@ build:
 
 test:
 	go test ./...
-	PYTHONPATH=probe $(OMLX_PYTHON) -m unittest discover -s probe -p 'test_*.py'
+	PYTHONPATH=probe $(PYTHON) -m unittest discover -s probe -p 'test_*.py'
 
 race:
 	go test -race ./...
@@ -24,7 +25,7 @@ vet:
 	go vet ./...
 
 python-test:
-	PYTHONPATH=probe $(OMLX_PYTHON) -m unittest discover -s probe -p 'test_*.py'
+	PYTHONPATH=probe $(PYTHON) -m unittest discover -s probe -p 'test_*.py'
 
 fetch-lens:
 	$(OMLX_PYTHON) scripts/fetch-lens.py

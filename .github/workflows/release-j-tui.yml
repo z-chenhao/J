@@ -37,6 +37,7 @@ jobs:
       - name: Build release archives
         shell: bash
         run: |
+          version="${GITHUB_REF_NAME#J-tui/v}"
           mkdir -p dist
           for operating_system in darwin linux; do
             for architecture in amd64 arm64; do
@@ -46,7 +47,7 @@ jobs:
                 cd J-tui
                 GOWORK=off CGO_ENABLED=0 \
                   GOOS="$operating_system" GOARCH="$architecture" \
-                  go build -trimpath -ldflags="-s -w" \
+                  go build -trimpath -ldflags="-s -w -X main.version=${version}" \
                   -o "../${output_dir}/j-tui" ./cmd/j-tui
               )
               tar -C "$output_dir" -czf "${output_dir}.tar.gz" j-tui

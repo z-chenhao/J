@@ -23,6 +23,7 @@ type File struct {
 	Memory         *Memory            `json:"memory,omitempty"`
 	Skills         *Skills            `json:"skills,omitempty"`
 	Subagents      *Subagents         `json:"subagents,omitempty"`
+	JSpace         *JSpace            `json:"jspace,omitempty"`
 }
 
 // Profile describes one concrete model connection.
@@ -90,6 +91,13 @@ type Subagent struct {
 	Profile      string   `json:"profile,omitempty"`
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
+}
+
+// JSpace configures the experimental authenticated capture sink. Model frames
+// are queued locally with mode 0600 until the home J-Space service accepts them.
+type JSpace struct {
+	URL          string `json:"url"`
+	CaptureToken string `json:"captureToken"`
 }
 
 // DefaultPath returns J-tui's user-scoped configuration path.
@@ -264,6 +272,38 @@ func (file File) validate() error {
 	}
 	if err := file.Subagents.validate(file.Profiles); err != nil {
 		return err
+	}
+	if err := file.JSpace.validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (jspace *JSpace) validate() error {
+	if jspace == nil {
+		return nil
+	}
+	jspace.URL = strings.TrimSpace(jspace.URL)
+	if jspace.URL == "" {
+		return errors.New("jspace.url is required")
+	}
+	target, err := url.Parse(jspace.URL)
+	if err != nil || target.Host == "" || target.User != nil ||
+		target.RawQuery != "" || target.Fragment != "" {
+		return errors.New("jspace.url must be an absolute URL without credentials, query, or fragment")
+	}
+	loopback := target.Hostname() == "127.0.0.1" ||
+		strings.EqualFold(target.Hostname(), "localhost") ||
+		target.Hostname() == "::1"
+	if !strings.EqualFold(target.Scheme, "https") &&
+		!(strings.EqualFold(target.Scheme, "http") && loopback) {
+		return errors.New("jspace.url must use HTTPS, except for loopback HTTP")
+	}
+	if err := ValidateValue(jspace.CaptureToken); err != nil {
+		return fmt.Errorf("jspace.captureToken: %w", err)
+	}
+	if strings.TrimSpace(jspace.CaptureToken) == "" {
+		return errors.New("jspace.captureToken is required")
 	}
 	return nil
 }

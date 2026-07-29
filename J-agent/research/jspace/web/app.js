@@ -360,7 +360,7 @@ function renderTimeline(events) {
     offset.textContent = formatDuration(event.offsetMs);
     const type = document.createElement("span");
     type.className = "timeline-type";
-    type.textContent = event.tool ? `${event.type} · ${event.tool}` : event.type;
+    type.textContent = [event.type, event.subagent, event.tool].filter(Boolean).join(" · ");
     const detail = document.createElement("span");
     detail.className = "timeline-detail";
     detail.textContent = event.durationMs != null

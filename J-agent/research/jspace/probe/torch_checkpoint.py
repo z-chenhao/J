@@ -19,13 +19,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
 
 @dataclass(frozen=True)
 class Storage:
     key: str
-    dtype: np.dtype
+    dtype: Any
     size: int
 
 
@@ -39,7 +37,7 @@ class Tensor:
 
 class _StorageType:
     def __init__(self, dtype: str):
-        self.dtype = np.dtype(dtype)
+        self.dtype = dtype
 
 
 def _rebuild_tensor(
@@ -71,6 +69,8 @@ class _RestrictedUnpickler(pickle.Unpickler):
         return allowed
 
     def persistent_load(self, identifier: Any) -> Storage:
+        import numpy as np
+
         if not isinstance(identifier, tuple) or len(identifier) < 5:
             raise pickle.UnpicklingError("invalid storage identifier")
         kind, storage_type, key, _location, size = identifier[:5]
@@ -104,6 +104,8 @@ class TorchZip:
         self.close()
 
     def array(self, tensor: Tensor) -> np.ndarray:
+        import numpy as np
+
         if not isinstance(tensor, Tensor):
             raise TypeError("checkpoint value is not a tensor")
         expected_stride = []
