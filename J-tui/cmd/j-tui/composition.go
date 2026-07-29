@@ -21,17 +21,19 @@ import (
 	"github.com/z-chenhao/J/J-mem/transcript"
 	jskills "github.com/z-chenhao/J/J-skills"
 	jsubagents "github.com/z-chenhao/J/J-subagents"
+	"github.com/z-chenhao/J/J-tui/internal/observe"
 	"github.com/z-chenhao/J/J-tui/internal/settings"
 )
 
 const (
 	mcpShutdownTimeout       = 5 * time.Second
 	mcpTLSHandshakeTimeout   = 20 * time.Second
+	transcriptSaveTimeout    = 5 * time.Second
 	maxMCPStartupStderrBytes = 16 << 10
 )
 
 type conversationRunner interface {
-	Run(context.Context, string, agent.EventHandler) (agent.RunResult, error)
+	Run(context.Context, string, observe.Handler) (agent.RunResult, error)
 }
 
 type runtimeComposition struct {
@@ -40,12 +42,39 @@ type runtimeComposition struct {
 	transcripts *transcript.Store
 	connections []*jmcp.Connection
 	mcpTools    []mcpToolObservation
+	subagents   *subagentEventRelay
 }
 
 type mcpToolObservation struct {
 	Server   string
 	Name     string
 	Selected bool
+}
+
+type subagentEventRelay struct {
+	mu      sync.Mutex
+	handler observe.Handler
+}
+
+func (relay *subagentEventRelay) begin(handler observe.Handler) {
+	relay.mu.Lock()
+	defer relay.mu.Unlock()
+	relay.handler = handler
+}
+
+func (relay *subagentEventRelay) end() {
+	relay.mu.Lock()
+	defer relay.mu.Unlock()
+	relay.handler = nil
+}
+
+func (relay *subagentEventRelay) emit(name string, event agent.Event) {
+	relay.mu.Lock()
+	handler := relay.handler
+	relay.mu.Unlock()
+	if handler != nil {
+		handler(observe.Event{Subagent: name, Runtime: event})
+	}
 }
 
 type mcpStartupStderr struct {
@@ -103,7 +132,7 @@ func (capture *mcpStartupStderr) stop() string {
 }
 
 func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error) {
-	composition := &runtimeComposition{}
+	composition := &runtimeComposition{subagents: &subagentEventRelay{}}
 	succeeded := false
 	defer func() {
 		if !succeeded {
@@ -131,6 +160,7 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 				return nil, err
 			}
 		}
+
 	}
 
 	if cfg.extensions != nil && cfg.extensions.MCP != nil {
@@ -162,41 +192,15 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 	}
 
 	if !cfg.listTools && cfg.skills != nil {
-		paths := make([]string, 0, len(cfg.skills.Paths))
-		for _, configuredPath := range cfg.skills.Paths {
-			resolved, err := settings.ResolveValue(configuredPath, os.LookupEnv)
-			if err != nil {
-				return nil, fmt.Errorf("resolve skill path %q: %w", configuredPath, err)
-			}
-			paths = append(paths, resolveStatePath(cfg.configPath, resolved))
-		}
-		catalog, err := jskills.Load(paths...)
+		_, catalog, err := loadConfiguredSkills(cfg.configPath, cfg.skills)
 		if err != nil {
-			return nil, fmt.Errorf("initialize skills: %w", err)
+			return nil, err
 		}
 		skillTool, err := catalog.Tool()
 		if err != nil {
 			return nil, fmt.Errorf("initialize skills tool: %w", err)
 		}
 		if err := composition.addTools(names, "J-skills", skillTool); err != nil {
-			return nil, err
-		}
-	}
-
-	if !cfg.listTools && cfg.subagents != nil {
-		definitions, err := buildSubagentDefinitions(cfg, composition.tools)
-		if err != nil {
-			return nil, err
-		}
-		subagentTool, err := jsubagents.NewTool(definitions...)
-		if err != nil {
-			return nil, fmt.Errorf("initialize subagents: %w", err)
-		}
-		if err := composition.addTools(
-			names,
-			"J-subagents",
-			subagentTool,
-		); err != nil {
 			return nil, err
 		}
 	}
@@ -224,8 +228,74 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		}
 	}
 
+	if !cfg.listTools && cfg.subagents != nil {
+		definitions, err := buildSubagentDefinitions(
+			cfg,
+			composition.tools,
+			composition.subagents,
+		)
+		if err != nil {
+			return nil, err
+		}
+		var subagentTool agent.Tool
+		if composition.transcripts != nil {
+			subagentTool, err = jsubagents.NewSessionTool(
+				jsubagents.SessionConfig{
+					ParentID: cfg.session,
+					Store:    composition.transcripts,
+				},
+				definitions...,
+			)
+		} else {
+			subagentTool, err = jsubagents.NewTool(definitions...)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("initialize subagents: %w", err)
+		}
+		if err := composition.addTools(
+			names,
+			"J-subagents",
+			subagentTool,
+		); err != nil {
+			return nil, err
+		}
+	}
+
 	succeeded = true
 	return composition, nil
+}
+
+func loadConfiguredSkills(
+	configPath string,
+	configured *settings.Skills,
+) (*jskills.Catalog, *jskills.Catalog, error) {
+	if configured == nil {
+		return nil, nil, errors.New("skills configuration is required")
+	}
+	paths := make([]string, 0, len(configured.Paths))
+	for _, configuredPath := range configured.Paths {
+		resolved, err := settings.ResolveValue(configuredPath, os.LookupEnv)
+		if err != nil {
+			return nil, nil, fmt.Errorf(
+				"resolve skill path %q: %w",
+				configuredPath,
+				err,
+			)
+		}
+		paths = append(paths, resolveStatePath(configPath, resolved))
+	}
+	catalog, err := jskills.Load(paths...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("initialize skills: %w", err)
+	}
+	selected := catalog
+	if configured.Include != nil {
+		selected, err = catalog.Select(configured.Include...)
+		if err != nil {
+			return nil, nil, fmt.Errorf("select skills: %w", err)
+		}
+	}
+	return catalog, selected, nil
 }
 
 func connectMCPServer(
@@ -390,6 +460,7 @@ func selectMCPTools(
 func buildSubagentDefinitions(
 	cfg config,
 	availableTools []agent.Tool,
+	events *subagentEventRelay,
 ) ([]jsubagents.Definition, error) {
 	names := make([]string, 0, len(cfg.subagents.Agents))
 	for name := range cfg.subagents.Agents {
@@ -429,6 +500,9 @@ func buildSubagentDefinitions(
 			Model:        model,
 			SystemPrompt: configured.SystemPrompt,
 			Tools:        tools,
+			EventHandler: func(event agent.Event) {
+				events.emit(name, event)
+			},
 		})
 	}
 	return definitions, nil
@@ -516,7 +590,8 @@ func (composition *runtimeComposition) Close() error {
 }
 
 type persistentRunner struct {
-	runner    *agent.Agent
+	runner    conversationRunner
+	history   func() []agent.Message
 	store     *transcript.Store
 	sessionID string
 }
@@ -524,16 +599,73 @@ type persistentRunner struct {
 func (runner *persistentRunner) Run(
 	ctx context.Context,
 	prompt string,
-	handler agent.EventHandler,
+	handler observe.Handler,
 ) (agent.RunResult, error) {
-	result, err := runner.runner.Run(ctx, prompt, handler)
-	if err != nil {
-		return result, err
+	if ctx == nil {
+		return agent.RunResult{}, errors.New("context is required")
 	}
-	if err := runner.store.Save(ctx, runner.sessionID, runner.runner.History()); err != nil {
-		return result, fmt.Errorf("persist session %q: %w", runner.sessionID, err)
+	runContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var checkpointErr error
+	result, runErr := runner.runner.Run(runContext, prompt, func(event observe.Event) {
+		if checkpointErr == nil && event.Subagent == "" &&
+			(event.Runtime.Type == agent.EventAgentStarted ||
+				event.Runtime.Type == agent.EventTurnCompleted) {
+			saveContext, stop := context.WithTimeout(
+				context.WithoutCancel(ctx),
+				transcriptSaveTimeout,
+			)
+			checkpointErr = runner.store.Save(
+				saveContext,
+				runner.sessionID,
+				runner.history(),
+			)
+			stop()
+			if checkpointErr != nil {
+				cancel()
+			}
+		}
+		if handler != nil {
+			handler(event)
+		}
+	})
+	if checkpointErr != nil {
+		return result, fmt.Errorf(
+			"persist session %q checkpoint: %w",
+			runner.sessionID,
+			checkpointErr,
+		)
 	}
-	return result, nil
+	return result, runErr
+}
+
+type observedRunner struct {
+	runner *agent.Agent
+	relay  *subagentEventRelay
+}
+
+func newObservedRunner(
+	runner *agent.Agent,
+	relay *subagentEventRelay,
+) *observedRunner {
+	if relay == nil {
+		relay = &subagentEventRelay{}
+	}
+	return &observedRunner{runner: runner, relay: relay}
+}
+
+func (runner *observedRunner) Run(
+	ctx context.Context,
+	prompt string,
+	handler observe.Handler,
+) (agent.RunResult, error) {
+	runner.relay.begin(handler)
+	defer runner.relay.end()
+	return runner.runner.Run(ctx, prompt, func(event agent.Event) {
+		if handler != nil {
+			handler(observe.Event{Runtime: event})
+		}
+	})
 }
 
 func sortedServerNames(servers map[string]settings.MCPServer) []string {

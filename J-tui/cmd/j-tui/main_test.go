@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/z-chenhao/J/J-agent/agent"
+	jsubagents "github.com/z-chenhao/J/J-subagents"
 	"github.com/z-chenhao/J/J-tui/internal/settings"
 )
 
@@ -368,6 +369,81 @@ func TestRunInitializesConfig(t *testing.T) {
 	}
 }
 
+func TestRunAuditsConfiguredSkillsWithoutStartingModel(t *testing.T) {
+	isolateConfig(t)
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.json")
+	for _, skill := range []struct {
+		name        string
+		description string
+	}{
+		{name: "research", description: "Inspect public evidence."},
+		{name: "writing", description: "Edit concise prose."},
+	} {
+		directory := filepath.Join(root, "skills", skill.name)
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		contents := fmt.Sprintf(
+			"---\nname: %s\ndescription: %s\n---\n\n# %s\n",
+			skill.name,
+			skill.description,
+			skill.name,
+		)
+		if err := os.WriteFile(
+			filepath.Join(directory, "SKILL.md"),
+			[]byte(contents),
+			0o644,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeConfig(t, configPath, `{
+		"defaultProfile": "unused",
+		"profiles": {
+			"unused": {
+				"provider": "openai",
+				"model": "unused",
+				"baseURL": "https://unused.invalid/v1"
+			}
+		},
+		"skills": {
+			"paths": ["skills"],
+			"include": ["research"]
+		}
+	}`)
+
+	var list bytes.Buffer
+	if err := run(context.Background(), []string{
+		"--config", configPath,
+		"--list-skills",
+	}, &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{
+		"SELECTED",
+		"yes",
+		"research",
+		"no",
+		"writing",
+	} {
+		if !strings.Contains(list.String(), expected) {
+			t.Fatalf("skill list missing %q:\n%s", expected, list.String())
+		}
+	}
+
+	var check bytes.Buffer
+	if err := run(context.Background(), []string{
+		"--config", configPath,
+		"--check-skills",
+	}, &check); err != nil {
+		t.Fatal(err)
+	}
+	if check.String() != "Validated 2 skills; 1 selected.\n" {
+		t.Fatalf("check output=%q", check.String())
+	}
+}
+
 func TestRunListsAdvertisedAndSelectedMCPToolsWithoutModel(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv("J_TUI_MCP_TEST_SERVER", "1")
@@ -514,7 +590,12 @@ func TestRunJSONEmitsCompleteToolLifecycle(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	if err := runJSON(context.Background(), runner, []string{"use the tool"}, &output); err != nil {
+	if err := runJSON(
+		context.Background(),
+		newObservedRunner(runner, nil),
+		[]string{"use the tool"},
+		&output,
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -560,6 +641,72 @@ func TestRunJSONEmitsCompleteToolLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunJSONIdentifiesSubagentEvents(t *testing.T) {
+	relay := &subagentEventRelay{}
+	childModel := &recordingModel{}
+	child, err := jsubagents.NewTool(jsubagents.Definition{
+		Name:        "research",
+		Description: "Research one bounded question.",
+		Model:       childModel,
+		EventHandler: func(event agent.Event) {
+			relay.emit("research", event)
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := agent.New(
+		&subagentCallingModel{},
+		agent.WithTools(child),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	if err := runJSON(
+		context.Background(),
+		newObservedRunner(root, relay),
+		[]string{"delegate"},
+		&output,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	sawChildDelta := false
+	sawChildCompletion := false
+	sawRootTool := false
+	decoder := json.NewDecoder(&output)
+	for decoder.More() {
+		var event traceEvent
+		if err := decoder.Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case event.Subagent == "research" &&
+			event.Type == agent.EventMessageDelta:
+			sawChildDelta = true
+		case event.Subagent == "research" &&
+			event.Type == agent.EventAgentCompleted:
+			sawChildCompletion = true
+		case event.Subagent == "" &&
+			event.Type == agent.EventToolCompleted &&
+			event.ToolCall != nil &&
+			event.ToolCall.Name == "subagent_run":
+			sawRootTool = true
+		}
+	}
+	if !sawChildDelta || !sawChildCompletion || !sawRootTool {
+		t.Fatalf(
+			"child delta=%v child completion=%v root tool=%v\n%s",
+			sawChildDelta,
+			sawChildCompletion,
+			sawRootTool,
+			output.String(),
+		)
+	}
+}
+
 func TestRunJSONEmitsFailureLifecycle(t *testing.T) {
 	runner, err := agent.New(failingModel{})
 	if err != nil {
@@ -567,7 +714,12 @@ func TestRunJSONEmitsFailureLifecycle(t *testing.T) {
 	}
 
 	var output bytes.Buffer
-	err = runJSON(context.Background(), runner, []string{"fail"}, &output)
+	err = runJSON(
+		context.Background(),
+		newObservedRunner(runner, nil),
+		[]string{"fail"},
+		&output,
+	)
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -610,7 +762,7 @@ func TestRunJSONPreservesCacheableConversationPrefix(t *testing.T) {
 	var output bytes.Buffer
 	if err := runJSON(
 		context.Background(),
-		runner,
+		newObservedRunner(runner, nil),
 		[]string{"first prompt", "second prompt"},
 		&output,
 	); err != nil {
@@ -674,6 +826,50 @@ func (model *scriptedModel) Complete(
 		Message:    agent.TextMessage(agent.RoleAssistant, "done"),
 		Provider:   "test",
 		Model:      "scripted",
+		StopReason: agent.StopReasonStop,
+	}, nil
+}
+
+type subagentCallingModel struct {
+	turn int
+}
+
+func (model *subagentCallingModel) Complete(
+	_ context.Context,
+	_ agent.ModelRequest,
+	emit func(agent.ModelDelta),
+) (agent.ModelResponse, error) {
+	model.turn++
+	if model.turn == 1 {
+		call := agent.ToolCall{
+			ID:        "delegate-1",
+			Name:      "subagent_run",
+			Arguments: json.RawMessage(`{"agent":"research","task":"inspect"}`),
+		}
+		emit(agent.ModelDelta{
+			Type:       agent.DeltaToolCall,
+			ToolCallID: call.ID,
+			ToolName:   call.Name,
+			Delta:      string(call.Arguments),
+		})
+		return agent.ModelResponse{
+			Message: agent.Message{
+				Role: agent.RoleAssistant,
+				Content: []agent.Content{{
+					Type:     agent.ContentToolCall,
+					ToolCall: &call,
+				}},
+			},
+			Provider:   "test",
+			Model:      "root",
+			StopReason: agent.StopReasonToolCalls,
+		}, nil
+	}
+	emit(agent.ModelDelta{Type: agent.DeltaText, Delta: "root done"})
+	return agent.ModelResponse{
+		Message:    agent.TextMessage(agent.RoleAssistant, "root done"),
+		Provider:   "test",
+		Model:      "root",
 		StopReason: agent.StopReasonStop,
 	}, nil
 }

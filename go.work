@@ -4,6 +4,7 @@ toolchain go1.26.5
 
 use (
 	./J-agent
+	./J-agent/research/jspace
 	./J-mcp
 	./J-mem
 	./J-skills

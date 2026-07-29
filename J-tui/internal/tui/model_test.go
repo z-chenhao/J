@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/z-chenhao/J/J-agent/agent"
+	"github.com/z-chenhao/J/J-tui/internal/observe"
 )
 
 func TestApplyEventTracksStreamingReasoningAndTools(t *testing.T) {
@@ -77,6 +78,96 @@ func TestApplyEventTracksStreamingReasoningAndTools(t *testing.T) {
 	}
 	if footer := model.footer(); !strings.Contains(footer, "cache 3 hit / 5 miss") {
 		t.Fatalf("footer = %q", footer)
+	}
+}
+
+func TestApplyObservedEventKeepsSubagentOutputAndUsageDistinct(t *testing.T) {
+	model := New(context.Background(), nil, "openai", "root", "", "")
+	rootCached := int64(4)
+	model.applyEvent(agent.Event{
+		Type: agent.EventTurnCompleted,
+		Model: &agent.ModelObservation{Usage: &agent.Usage{
+			InputTokens:       8,
+			OutputTokens:      2,
+			TotalTokens:       10,
+			CachedInputTokens: &rootCached,
+		}},
+	})
+
+	source := "research"
+	model.applyObservedEvent(observe.Event{
+		Subagent: source,
+		Runtime:  agent.Event{Type: agent.EventMessageStarted},
+	})
+	model.applyObservedEvent(observe.Event{
+		Subagent: source,
+		Runtime: agent.Event{
+			Type: agent.EventMessageDelta,
+			Delta: &agent.ModelDelta{
+				Type:  agent.DeltaReasoning,
+				Delta: "inspect sources",
+			},
+		},
+	})
+	model.applyObservedEvent(observe.Event{
+		Subagent: source,
+		Runtime: agent.Event{
+			Type:  agent.EventMessageDelta,
+			Delta: &agent.ModelDelta{Type: agent.DeltaText, Delta: "found it"},
+		},
+	})
+	message := agent.TextMessage(agent.RoleAssistant, "found it")
+	model.applyObservedEvent(observe.Event{
+		Subagent: source,
+		Runtime: agent.Event{
+			Type:    agent.EventMessageCompleted,
+			Message: &message,
+		},
+	})
+	call := agent.ToolCall{ID: "same-id", Name: "tavily_search"}
+	model.applyObservedEvent(observe.Event{
+		Subagent: source,
+		Runtime: agent.Event{
+			Type:     agent.EventToolStarted,
+			ToolCall: &call,
+		},
+	})
+	model.applyObservedEvent(observe.Event{
+		Subagent: source,
+		Runtime: agent.Event{
+			Type:     agent.EventToolCompleted,
+			ToolCall: &call,
+			Output:   "source",
+		},
+	})
+	model.applyObservedEvent(observe.Event{
+		Subagent: source,
+		Runtime: agent.Event{
+			Type: agent.EventTurnCompleted,
+			Model: &agent.ModelObservation{Usage: &agent.Usage{
+				InputTokens:  3,
+				OutputTokens: 1,
+				TotalTokens:  4,
+			}},
+		},
+	})
+
+	if len(model.items) != 2 {
+		t.Fatalf("items=%#v", model.items)
+	}
+	if got := model.items[0]; got.label != source ||
+		got.reasoning != "inspect sources" || got.text != "found it" {
+		t.Fatalf("subagent message=%#v", got)
+	}
+	if got := model.items[1]; got.toolName != "research › tavily_search" ||
+		got.toolOutput != "source" {
+		t.Fatalf("subagent tool=%#v", got)
+	}
+	footer := model.footer()
+	if !strings.Contains(footer, "10 tokens") ||
+		!strings.Contains(footer, "cache 4 hit / 4 miss") ||
+		!strings.Contains(footer, "subagents 1 turns / 4 tokens") {
+		t.Fatalf("footer=%q", footer)
 	}
 }
 

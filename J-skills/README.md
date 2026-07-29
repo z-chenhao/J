@@ -15,6 +15,10 @@ catalog, err := skills.Load("/opt/agent-skills", "/workspace/.agents/skills")
 if err != nil {
     return err
 }
+catalog, err = catalog.Select("research", "code-review")
+if err != nil {
+    return err
+}
 skillTool, err := catalog.Tool()
 if err != nil {
     return err
@@ -31,3 +35,5 @@ is read for compatibility with existing Pi skills.
 J-skills deliberately does not install packages, auto-search user or project
 directories, execute scripts, interpret `allowed-tools`, or define trust
 policy. Hosts choose the roots and the other Tools supplied to the Agent.
+Hosts that share a large root may use `Select` to expose an exact, auditable
+subset without introducing glob or precedence semantics.

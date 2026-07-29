@@ -113,6 +113,51 @@ func (catalog *Catalog) Skills() []Skill {
 	return append([]Skill(nil), catalog.skills...)
 }
 
+// Select returns an immutable catalog containing the exact named skills.
+// Selection is explicit and deterministic; unknown or repeated names fail
+// rather than silently changing the model-visible capability set.
+func (catalog *Catalog) Select(names ...string) (*Catalog, error) {
+	if catalog == nil || len(catalog.skills) == 0 {
+		return nil, errors.New("skill catalog is empty")
+	}
+	if len(names) == 0 {
+		return nil, errors.New("at least one skill name is required")
+	}
+	selected := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		if name == "" || name != strings.TrimSpace(name) {
+			return nil, fmt.Errorf("skill name %q must be non-empty and trimmed", name)
+		}
+		if _, exists := selected[name]; exists {
+			return nil, fmt.Errorf("skill name %q is repeated", name)
+		}
+		if _, exists := catalog.byName[name]; !exists {
+			available := make([]string, 0, len(catalog.skills))
+			for _, skill := range catalog.skills {
+				available = append(available, skill.Name)
+			}
+			return nil, fmt.Errorf(
+				"skill %q is not available; available skills: %q",
+				name,
+				available,
+			)
+		}
+		selected[name] = struct{}{}
+	}
+	filtered := &Catalog{
+		skills: make([]Skill, 0, len(selected)),
+		byName: make(map[string]Skill, len(selected)),
+	}
+	for _, skill := range catalog.skills {
+		if _, exists := selected[skill.Name]; !exists {
+			continue
+		}
+		filtered.skills = append(filtered.skills, skill)
+		filtered.byName[skill.Name] = skill
+	}
+	return filtered, nil
+}
+
 // Tool returns the ordinary J-agent Tool used to load skill instructions and
 // referenced resources on demand.
 func (catalog *Catalog) Tool() (agent.Tool, error) {

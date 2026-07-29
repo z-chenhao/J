@@ -91,6 +91,56 @@ func TestLoadRejectsDuplicateNames(t *testing.T) {
 	}
 }
 
+func TestSelectReturnsExactDeterministicCatalog(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "zeta", "Zeta.", "# Zeta")
+	writeSkill(t, root, "alpha", "Alpha.", "# Alpha")
+	writeSkill(t, root, "beta", "Beta.", "# Beta")
+	catalog, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected, err := catalog.Select("zeta", "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := selected.Skills()
+	if len(found) != 2 || found[0].Name != "alpha" || found[1].Name != "zeta" {
+		t.Fatalf("skills=%#v", found)
+	}
+	if len(catalog.Skills()) != 3 {
+		t.Fatal("Select mutated the source catalog")
+	}
+	tool, err := selected.Tool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if description := tool.Spec().Description; strings.Contains(description, "beta:") {
+		t.Fatalf("description=%q", description)
+	}
+}
+
+func TestSelectRejectsInvalidNames(t *testing.T) {
+	root := t.TempDir()
+	writeSkill(t, root, "alpha", "Alpha.", "# Alpha")
+	catalog, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, selected := range map[string][]string{
+		"empty":     {},
+		"blank":     {" "},
+		"duplicate": {"alpha", "alpha"},
+		"unknown":   {"missing"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := catalog.Select(selected...); err == nil {
+				t.Fatal("invalid selection was accepted")
+			}
+		})
+	}
+}
+
 func TestLoadRejectsEmptyAndInvalidRoots(t *testing.T) {
 	if _, err := Load(); err == nil {
 		t.Fatal("empty roots were accepted")

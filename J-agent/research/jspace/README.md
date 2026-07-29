@@ -1,135 +1,163 @@
-# J-Space model and harness research
+# J-Space Workbench
 
-This directory defines how J-agent uses J-Space research to compare models and agent
-harness recipes. It does not add J-Space to the runtime.
+J-Space Workbench is J's independent local interpretability module. It aligns
+J-agent lifecycle events with a Jacobian-lens replay of the exact model-turn
+token sequence, then renders the result as an interactive layer × token view.
 
-## What J-Space is
+It does not add Python, MLX, model weights, fitted lenses, visualization
+concepts, or deployment policy to the J-agent runtime.
 
-Anthropic describes the J-space as a small, emergent family of internal neural
-representations that can be read with a Jacobian lens. The representations are
-reportable, deliberately modulated, used for some multi-step reasoning, reused
-flexibly, and selective relative to the model's total processing.
+## What is measured
 
-The official `anthropics/jacobian-lens` repository is a Python reference
-implementation for open-weight decoder transformers. It is explicitly a
-research implementation, is not maintained, and requires model weights and
-intermediate activations. A normal hosted-model API does not expose the data
-needed to claim a J-lens measurement.
-
-## Research question
-
-For a fixed model and task set:
-
-> Which J-agent harness recipe maximizes task success while minimizing turns, tokens,
-> latency, and unsafe or invalid tool actions?
-
-J-lens observations are diagnostic evidence about internal representations.
-They are not a replacement for behavioral evaluation.
-
-## Boundary
-
-Research dependencies, model weights, fitted lenses, datasets, and GPU-specific
-code stay outside J-agent's Go module. This avoids:
-
-- forcing Python or ML dependencies on runtime users
-- coupling J to one interpretability implementation
-- exposing model activations as a stable agent contract
-- presenting an unvalidated harness as framework semantics
-
-Research artifacts should live in a separate experiment checkout or an
-ignored local directory and refer back to a J-agent commit.
-
-## Minimum experiment
-
-Compare one baseline and one changed harness at a time.
-
-Hold constant:
-
-- exact model checkpoint and tokenizer
-- generation parameters and random seeds
-- tool implementations and schemas
-- task corpus and scoring
-- hardware and inference engine
-- fitted J-lens checkpoint
-
-Record:
-
-- J-agent commit
-- model and lens identifiers
-- harness text and context assembly
-- tool schema encoding
-- task-level outputs
-- task success and invalid-action rate
-- turns, input/output tokens, wall time, and peak memory
-- selected J-lens tokens by layer and position
-
-Do not aggregate away failed or timed-out runs.
-
-## Harness axes to test
-
-Each axis must be tested independently before combinations:
-
-1. system instruction content
-2. tool schema wording and ordering
-3. placement of tool results in conversation history
-4. context truncation policy
-5. explicit reflection or planning instructions
-6. error feedback presented after invalid tool calls
-
-These are hypotheses, not J-agent defaults.
-
-## J-lens observations
-
-Pre-register task-relevant concepts before inspecting results. Useful
-observations may include:
-
-- whether intermediate task concepts appear in the middle-layer workspace band
-- whether they occur in a causally plausible order
-- whether relevant concepts persist while unrelated concepts remain selective
-- whether warning, injection, fabrication, or manipulation concepts appear
-- whether a harness changes these observations consistently across seeds
-
-Avoid interpreting a surfaced token as a complete thought or ground truth.
-
-## Adoption gate
-
-A harness recipe may become a documented J default only when:
-
-1. J-lens results reproduce across seeds and a held-out task split;
-2. behavioral task success improves;
-3. invalid tool actions do not increase;
-4. token or latency cost is acceptable;
-5. a second model does not reveal an obvious model-specific failure;
-6. raw results and the scoring procedure are publishable.
-
-If only J-lens metrics improve, keep the recipe experimental. If only behavior
-improves, record the result without claiming J-Space explains it.
-
-## Reproducibility record
-
-For each experiment, create a small Markdown report containing:
+Anthropic's Jacobian lens transports a residual-stream vector at layer `l`
+into the final-layer basis and decodes it with the model's own unembedding:
 
 ```text
-date:
-J commit:
-research code commit:
-model checkpoint:
-lens checkpoint:
-hardware:
-task corpus:
-baseline harness:
-candidate harness:
-behavioral metrics:
-J-lens observations:
-failures:
-decision:
+lens_l(h) = unembed(J_l @ h)
+J_l = E[d h_final / d h_l]
 ```
 
-No performance claim belongs in J's README until a completed report supports
-it.
+The resulting ranked vocabulary tokens indicate concepts that the activation
+is disposed to make the model verbalize later. They are not generated text,
+private chain-of-thought, a complete thought, or ground truth.
+
+The workbench has two explicitly separate clocks:
+
+1. J-agent events are recorded live while the configured model/tool run occurs.
+2. After each model turn completes, the exact request plus returned assistant
+   message is replayed through an instrumented local checkpoint. The replay
+   reads residual activations and applies the matching fitted J-lens.
+
+For a causal decoder, replaying the same token prefix recovers the same
+autoregressive computation in principle. Quantized kernels, cache layout, MTP,
+and the separate process can still introduce numerical differences, so the UI
+labels this as `posthoc_replay`; it never presents it as a provider-native live
+activation stream.
+
+## Supported local profile
+
+The first validated profile targets:
+
+- runtime model: `Qwen3.6-35B-A3B-oQ4e-mtp`
+- checkpoint family: `Qwen/Qwen3.6-35B-A3B`
+- local model path:
+  `~/.omlx/models/Jundot/Qwen3.6-35B-A3B-oQ4e-mtp`
+- fitted lens:
+  `stanleytheli/qwen3.6-35B-A3B-jlens`, `lens.pt`
+- 40 decoder layers, residual width 2048, vocabulary size 248,320
+
+The fitted lens was produced for the unquantized base checkpoint. Applying it
+to an oQ4e/oQ5e mixed-quantization checkpoint is useful experimental evidence,
+not proof that quantization leaves J-space geometry unchanged. The artifact
+records both identifiers so comparisons cannot silently mix them.
+
+The pinned lens revision currently validates as 39 source matrices (layers
+0–38), each 2048 × 2048 in float16, fitted from 1,000 prompts. The final layer
+is decoded directly, matching the reference implementation. The fetch helper
+prints the exact revision, file size, and SHA-256.
+
+## Quick start
+
+Build the dependency-free Go programs:
+
+```bash
+make build
+```
+
+Download the fitted lens into local research state:
+
+```bash
+make fetch-lens
+```
+
+Start the local viewer:
+
+```bash
+./bin/jspace-server
+```
+
+Open <http://127.0.0.1:8090/jspace/>.
+
+Record one J-agent run and then perform the J-lens replay:
+
+```bash
+./bin/jspace-record \
+  --label "two-hop reasoning" \
+  --prompt "How many legs does the animal that spins webs have?"
+```
+
+`jspace-record` uses the public J-agent `Model`, `Tool`, and `EventHandler`
+seams. It defaults to the repository's local oMLX profile and reads the oMLX
+API key into the child process environment without placing the secret in
+arguments or artifacts.
+
+The MLX probe runs with oMLX's Python environment by default. Override paths
+with flags or environment variables when the host differs:
+
+```text
+JSPACE_MODEL_PATH
+JSPACE_LENS_PATH
+JSPACE_STATE_DIR
+JSPACE_PROBE_PYTHON
+JSPACE_OMLX_SETTINGS
+```
+
+Raw prompts, reasoning, tool results, and model responses are held only long
+enough to construct the replay input. The public artifact stores event kinds,
+timings, usage, token labels, and J-lens readouts. Pass
+`--retain-transcript` only for an explicitly private experiment.
+
+## Public read-only viewer
+
+The repository includes `jspace-gateway`, a narrow reverse proxy intended for
+the existing Tailscale Funnel deployment:
+
+```text
+https://usej-model.tailb0426d.ts.net/jspace/
+```
+
+The page shell and explicitly illustrative `/jspace/api/demo` artifact are
+public. Every endpoint containing real observations requires a separate viewer
+token. The gateway only allows `GET` and `HEAD` for J-space paths, so a public
+client cannot start Agent runs, import artifacts, change models, or invoke
+tools. The local server independently verifies the same token.
+
+On first start the gateway creates a mode-0600 token file at
+`~/.j/jspace/access-token` if one does not exist. The token is never logged or
+embedded in the page. Paste it into the page's unlock form; the browser keeps
+it in `sessionStorage`, not persistent storage or the URL.
+
+Deployment files and lifecycle commands are documented in
+[`deploy/README.md`](deploy/README.md).
+
+## Artifact contract
+
+Artifacts use the experimental `jspace.trace.v0.1` schema. Each file records:
+
+- J commit, model checkpoint, quantization, lens repository, and lens digest;
+- measurement kind and replay-fidelity limitations;
+- safe J-agent lifecycle events and normalized usage;
+- selected token positions;
+- per-position, per-layer top J-lens tokens and ranks;
+- failures and partial results without aggregating them away.
+
+The schema is owned by this research module and is not a J-agent public
+contract. A second independent viewer or probe must validate it before any
+stability promise.
+
+## Research use
+
+Pre-register task-relevant concepts before inspecting a result. Compare one
+harness change at a time while holding the model, tokenizer, lens, generation
+parameters, tools, task corpus, hardware, and seed constant.
+
+J-lens evidence may explain a behavioral change, but it does not replace task
+success, invalid-action, latency, token, and safety evaluation. No harness
+default should change from J-space evidence alone.
 
 ## Primary sources
 
 - <https://www.anthropic.com/research/global-workspace>
 - <https://transformer-circuits.pub/2026/workspace/>
 - <https://github.com/anthropics/jacobian-lens>
+- <https://huggingface.co/stanleytheli/qwen3.6-35B-A3B-jlens>

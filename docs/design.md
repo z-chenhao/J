@@ -3,7 +3,7 @@
 This is the single repository-level source for J's architecture, module
 ownership, extension strategy, and accumulated design conclusions.
 
-Last reviewed: 2026-07-28.
+Last reviewed: 2026-07-29.
 
 ## 1. Concrete goal
 
@@ -16,15 +16,20 @@ kernel. J-tui, J-mcp, J-mem, J-skills, and J-subagents are first-party
 consumers used to prove that the public seams are sufficient for real
 customization.
 
+The repository name also comes from the Jacobian and the J-space research
+direction. That identity is implemented as an independent workbench under
+`J-agent/research/jspace`; it observes J-agent through the same public seams as
+other consumers and does not make model internals a runtime responsibility.
+
 Current verified consumers of J-agent are its reference CLI, private JSONL
-runtime, J-tui, J-mcp, and J-mem. One OpenAI Provider exercises the model seam
-through OpenAI-compatible and Azure OpenAI Chat Completions protocols; the
-backing servers do not count as independent `Model` implementations. J-tui
-consumes the public event and cancellation seams, J-mcp projects MCP tools
-through `agent.Tool`, and J-mem persists `History` and supplies four ordinary
-memory Tools. J-skills projects standard capability resources through one Tool,
-and J-subagents constructs isolated child Agents behind another Tool, all
-without a runtime API change.
+runtime, J-tui, J-mcp, J-mem, J-skills, and J-subagents. One OpenAI
+Provider exercises the model seam through OpenAI-compatible and Azure OpenAI
+Chat Completions protocols; the backing servers do not count as independent
+`Model` implementations. J-tui consumes the public event and cancellation
+seams, J-mcp projects MCP tools through `agent.Tool`, and J-mem persists
+`History` and supplies four ordinary memory Tools. J-skills projects standard
+capability resources through one Tool, J-subagents constructs isolated child
+Agents behind another Tool, all without a runtime API change.
 
 ## 2. Engineering constitution
 
@@ -105,7 +110,7 @@ real J consumers prove more are necessary.
 
 ```text
 J/
-├── J-agent/   model/tool loop and provider-neutral transcript
+├── J-agent/   model/tool loop, plus isolated research under research/
 ├── J-tui/     terminal presentation and interaction
 ├── J-mcp/     MCP client lifecycle and Tool projection
 ├── J-mem/     local persistence and memory tools
@@ -155,6 +160,14 @@ transcript continuity and provider-reported usage normalization.
 authoritative, including any system message. J-agent validates message shape,
 tool identity, tool-result correlation, and completed tool batches before
 accepting it.
+
+Recovery stops at complete transcript checkpoints. J-tui persists the accepted
+root user turn and every complete model/tool turn, then reconstructs an Agent
+through `WithHistory`; it does not claim to resume an in-flight provider stream
+or partially completed tool batch. J-subagents now proves a second real
+transcript consumer: a host may give a child a stable identity, save the same
+checkpoints, and restore it through the same `WithHistory` seam. Child identity,
+storage keys, and parent ownership remain outside J-agent.
 
 J-agent does not own:
 
@@ -416,15 +429,19 @@ unstabilized. Strict standard validation is preferable to silently changing
 skill identity; a future compatibility relaxation needs a real failing skill
 consumer.
 
+J-tui may select an exact subset from the discovered immutable catalog and
+exposes list/check audit commands. Selection is host policy; J-skills adds only
+the narrow catalog operation needed to validate exact names deterministically.
+
 ### J-subagents
 
-J-subagents proves that isolated child runs fit J-agent's existing Model and
-Tool seams. A host supplies named definitions containing a Model, optional
-system prompt, and exact Tools. The module returns one `subagent_run` Tool.
-Every call constructs a fresh Agent transcript, propagates the call context,
-and returns structured final content, turn count, and usage. Calls for one
-definition are serialized because `agent.Model` does not promise concurrent
-safety.
+J-subagents proves that isolated child runs fit J-agent's existing Model,
+Tool, event, and transcript seams. A host supplies named definitions containing
+a Model, optional system prompt, and exact Tools. The module returns one
+`subagent_run` Tool. Calls for one definition are serialized because
+`agent.Model` does not promise concurrent safety. An optional existing
+`EventHandler` observes child lifecycle events; the host attaches configured
+subagent identity in its own private projection.
 
 J-tui is the first product host. Each recipe may select an existing model
 profile and an exact subset of the already composed non-subagent Tools.
@@ -432,12 +449,49 @@ Omitting the tool list inherits that snapshot; an explicit empty list creates
 a model-only child. The subagent Tool is added last, so recursive delegation is
 not ambient.
 
+`NewTool` retains the minimal fresh-transcript recipe. `NewSessionTool` is an
+experimental optional composition for a host that already owns a durable
+parent session. It returns a host-generated child session ID, scopes opaque
+storage keys to the parent and configured recipe, and accepts that exact ID on
+a later call. Its narrow `TranscriptStore` contract is implemented by
+J-mem's existing SQLite transcript store without making J-subagents depend on
+J-mem. External hosts can implement the same two complete-snapshot operations.
+As with root restoration, the saved child transcript is authoritative; a later
+recipe prompt change applies only to new child sessions.
+
+Checkpoint semantics are explicit. The accepted child user turn and each
+complete model/tool turn are restorable. Failed calls return their child
+session ID with the error. An in-flight provider stream, a partial tool batch,
+or a hard crash before the parent observes the child ID is not automatically
+replayed or discovered. Automatic retry would make side effects ambiguous and
+therefore remains absent.
+
 This design deliberately has no J-delegate intermediate and no J-agent
-`SubAgent` interface. Background jobs, parallel and chain orchestration,
-steering, child transcript persistence, worktrees, approval, recursive
-inheritance, and a universal registry remain outside the first version.
-Child-provider usage is returned in the Tool result rather than being
-misattributed to the parent model's `RunResult`.
+`SubAgent`, `Session`, or `Storage` interface. Background jobs, parallel and
+chain orchestration, steering, worktrees, approval, recursive inheritance,
+session browsing, hard-crash discovery, and a universal registry remain
+outside this foreground mechanism. Child-provider usage is returned in the
+Tool result rather than being misattributed to the parent model's `RunResult`.
+Concurrent resume of one child from multiple processes is unsupported; adding
+leases or optimistic revisions before a multi-process consumer exists would
+turn a local transcript recipe into a speculative workflow store.
+
+### External information retrieval
+
+J does not currently ship a dedicated external-information module. Tavily
+already exposes its capability through standard MCP, and J-tui can connect to
+that Streamable HTTP server directly through J-mcp. A second direct Tavily API
+wrapper would duplicate authentication, networking, configuration, tool
+selection, and maintenance without adding an independently valuable retrieval
+mechanism.
+
+This is a restraint decision, not a claim that retrieval has no product value.
+A future module should first prove a J-owned capability such as retrieval
+planning, source normalization, multi-backend evidence, indexing, or
+reproducible quality evaluation. Its name and contract should follow that
+proven mechanism. `J-web` remains unallocated so it can naturally name a future
+Web UI; neither that product nor a generic search-provider interface is
+promised yet.
 
 ## 8. Extension composition
 
@@ -453,11 +507,11 @@ deliberately narrow tool projection. It does not add a J-specific wire
 protocol: J-mcp speaks MCP directly. It also does not use Go runtime plugins,
 auto-discovery, runtime tool mutation, or generic configuration payloads.
 
-J-mem, J-skills, and J-subagents provide meaningfully different
-Tool-producing modules. J-mem also owns transcript lifecycle, J-skills owns
-resource discovery, and J-subagents consumes Model plus Tool recipes. J-tui
-therefore composes them through separate typed sections rather than pretending
-they share MCP's connection lifecycle. These differences are evidence against
+J-mem, J-skills, and J-subagents provide meaningfully different Tool-producing
+modules. J-mem also owns transcript lifecycle, J-skills owns resource
+discovery, and J-subagents consumes Model plus Tool recipes. J-tui therefore
+composes them through separate typed sections rather than pretending they
+share MCP's connection lifecycle. These differences are evidence against
 extracting a common lifecycle prematurely. `Extension`, `Plugin`, `Skill`,
 `SubAgent`, and `MCP` remain absent from J-agent.
 
@@ -469,7 +523,7 @@ These names describe product modules, not promised J-agent interfaces:
 | --- | --- |
 | J-mcp | Implemented independent bridge; map MCP tools to `agent.Tool`; own connection lifecycle |
 | J-skills | Implemented standard skill discovery and progressive resource Tool |
-| J-subagents | Implemented foreground isolated child Agents behind one Tool |
+| J-subagents | Implemented foreground isolated child Agents with optional transcript restoration |
 | J-plugins | Own discovery, trust, installation, and composition |
 | J-gateway | Map platform chat identity to external Agent/session ownership |
 
@@ -516,8 +570,9 @@ Potential future mechanisms must be validated in this order:
   runtime and carries no availability promise.
 - J-tui owns its experimental profile file and release artifacts; J-agent does
   not read product configuration or install packages.
-- J-Space research informs model/Harness choices but is not a runtime
-  integration or README identity.
+- J-Space is part of J's research identity and has an independent local
+  workbench under `J-agent/research/`; it is not a runtime dependency or a
+  model-internals promise in J-agent's public API.
 - Reasoning content is preserved when provider continuation requires it.
 - The JSONL process is a reference transport, not universal framework
   semantics.
@@ -547,8 +602,9 @@ Potential future mechanisms must be validated in this order:
    passing through J-tui's separate memory lifecycle.
 6. Keep J-skills standard validation, bounded resource confinement, and
    progressive Tool loading passing.
-7. Keep J-subagents' fresh transcript, explicit capability selection,
-   cancellation, and provider usage result passing.
+7. Keep J-subagents' fresh and restored transcripts, parent isolation,
+   complete-checkpoint persistence, explicit capability selection,
+   cancellation, child event projection, and provider usage result passing.
 8. Validate provider-backed MCP and subagent calls as operational smoke tests
    without a J-agent API change.
 9. Re-audit actual integration friction before changing J-agent.

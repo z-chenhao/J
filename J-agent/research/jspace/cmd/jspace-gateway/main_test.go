@@ -1,0 +1,98 @@
+package main
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"testing"
+
+	jspaceauth "github.com/z-chenhao/J/J-agent/research/jspace/internal/auth"
+)
+
+func TestClassifyKeepsPublicSurfaceNarrow(t *testing.T) {
+	for _, test := range []struct {
+		method string
+		path   string
+		want   route
+	}{
+		{http.MethodGet, "/v1/models", routeModel},
+		{http.MethodPost, "/v1/chat/completions", routeModel},
+		{http.MethodGet, "/jspace/", routeJSpacePage},
+		{http.MethodGet, "/jspace/app.js", routeJSpacePage},
+		{http.MethodGet, "/jspace/api/demo", routeJSpacePage},
+		{http.MethodGet, "/jspace/api/runs", routeJSpaceAPI},
+		{http.MethodPost, "/jspace/api/runs", routeDenied},
+		{http.MethodGet, "/.env", routeDenied},
+		{http.MethodGet, "/jspace/private.json", routeDenied},
+		{http.MethodGet, "/jspace/app.js.map", routeDenied},
+	} {
+		if got := classify(test.method, test.path); got != test.want {
+			t.Fatalf("%s %s got=%v want=%v", test.method, test.path, got, test.want)
+		}
+	}
+}
+
+func TestViewerAPIRequiresIndependentToken(t *testing.T) {
+	upstream := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if !jspaceauth.Equal(jspaceauth.Bearer(request.Header.Get("Authorization")), "viewer-secret") {
+			t.Fatal("viewer token was not forwarded to local server")
+		}
+		_, _ = io.WriteString(writer, `{"ok":true}`)
+	})
+	application := &gateway{
+		modelProxy:  http.NotFoundHandler(),
+		jspaceProxy: upstream,
+		viewerToken: "viewer-secret",
+		modelLimit:  &limiter{windows: make(map[string]rateWindow)},
+		viewLimit:   &limiter{windows: make(map[string]rateWindow)},
+		modelActive: make(chan struct{}, 1),
+	}
+	for _, test := range []struct {
+		token  string
+		status int
+	}{
+		{"", http.StatusUnauthorized},
+		{"wrong", http.StatusUnauthorized},
+		{"viewer-secret", http.StatusOK},
+	} {
+		request := httptest.NewRequest(http.MethodGet, "/jspace/api/runs", nil)
+		if test.token != "" {
+			request.Header.Set("Authorization", "Bearer "+test.token)
+		}
+		response := httptest.NewRecorder()
+		application.ServeHTTP(response, request)
+		if response.Code != test.status {
+			t.Fatalf("token=%q status=%d body=%s", test.token, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestModelProxyInjectsOnlyModelKey(t *testing.T) {
+	transport := roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("Authorization") != "Bearer model-secret" {
+			t.Fatalf("authorization=%q", request.Header.Get("Authorization"))
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+		}, nil
+	})
+	target, _ := url.Parse("http://model.local")
+	proxy := reverseProxyWithTransport(target, "model-secret", transport)
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
+	request.Header.Set("Authorization", "Bearer untrusted-client-value")
+	response := httptest.NewRecorder()
+	proxy.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (function roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return function(request)
+}

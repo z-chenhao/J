@@ -20,6 +20,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/provider/openai"
+	jskills "github.com/z-chenhao/J/J-skills"
+	"github.com/z-chenhao/J/J-tui/internal/observe"
 	"github.com/z-chenhao/J/J-tui/internal/settings"
 	"github.com/z-chenhao/J/J-tui/internal/tui"
 )
@@ -29,6 +31,8 @@ type config struct {
 	profile         string
 	initConfig      bool
 	listTools       bool
+	listSkills      bool
+	checkSkills     bool
 	mode            string
 	provider        string
 	api             string
@@ -83,6 +87,22 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 		}()
 		return writeMCPToolList(out, composition.mcpTools)
 	}
+	if cfg.listSkills || cfg.checkSkills {
+		catalog, selected, err := loadConfiguredSkills(cfg.configPath, cfg.skills)
+		if err != nil {
+			return err
+		}
+		if cfg.checkSkills {
+			_, err := fmt.Fprintf(
+				out,
+				"Validated %d skills; %d selected.\n",
+				len(catalog.Skills()),
+				len(selected.Skills()),
+			)
+			return err
+		}
+		return writeSkillList(out, catalog, selected)
+	}
 	if err := ensureSession(&cfg); err != nil {
 		return err
 	}
@@ -105,10 +125,12 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 	if err != nil {
 		return err
 	}
-	var runner conversationRunner = agentRunner
+	observed := newObservedRunner(agentRunner, composition.subagents)
+	var runner conversationRunner = observed
 	if composition.transcripts != nil {
 		runner = &persistentRunner{
-			runner:    agentRunner,
+			runner:    observed,
+			history:   agentRunner.History,
 			store:     composition.transcripts,
 			sessionID: cfg.session,
 		}
@@ -148,6 +170,18 @@ func parseConfig(args []string) (config, error) {
 		"list-tools",
 		false,
 		"list configured MCP tools and selection state, then exit",
+	)
+	flags.BoolVar(
+		&values.listSkills,
+		"list-skills",
+		false,
+		"list discovered skills and selection state, then exit",
+	)
+	flags.BoolVar(
+		&values.checkSkills,
+		"check-skills",
+		false,
+		"validate configured skills and selection, then exit",
 	)
 	flags.StringVar(&values.mode, "mode", "tui", "output mode: tui or json")
 	flags.StringVar(&values.provider, "provider", "", "model provider: openai")
@@ -225,6 +259,11 @@ func parseConfig(args []string) (config, error) {
 		if values.listTools {
 			return config{}, errors.New("--init-config does not accept --list-tools")
 		}
+		if values.listSkills || values.checkSkills {
+			return config{}, errors.New(
+				"--init-config does not accept --list-skills or --check-skills",
+			)
+		}
 		return config{
 			configPath: configPath,
 			initConfig: true,
@@ -235,6 +274,8 @@ func parseConfig(args []string) (config, error) {
 	cfg := config{
 		configPath:      configPath,
 		listTools:       values.listTools,
+		listSkills:      values.listSkills,
+		checkSkills:     values.checkSkills,
 		noSession:       values.noSession,
 		mode:            "tui",
 		provider:        "openai",
@@ -288,21 +329,37 @@ func parseConfig(args []string) (config, error) {
 	cfg.reasoningField = strings.ToLower(strings.TrimSpace(cfg.reasoningField))
 	cfg.reasoningEffort = strings.ToLower(strings.TrimSpace(cfg.reasoningEffort))
 	cfg.session = strings.TrimSpace(cfg.session)
-	if cfg.listTools {
+	auditModes := 0
+	for _, enabled := range []bool{cfg.listTools, cfg.listSkills, cfg.checkSkills} {
+		if enabled {
+			auditModes++
+		}
+	}
+	if auditModes > 1 {
+		return config{}, errors.New(
+			"--list-tools, --list-skills, and --check-skills are mutually exclusive",
+		)
+	}
+	if cfg.listTools || cfg.listSkills || cfg.checkSkills {
 		if len(cfg.prompts) > 0 {
-			return config{}, errors.New("--list-tools does not accept a prompt")
+			return config{}, errors.New("audit commands do not accept a prompt")
 		}
 		if visited["mode"] {
-			return config{}, errors.New("--list-tools does not accept --mode")
+			return config{}, errors.New("audit commands do not accept --mode")
 		}
 		if cfg.session != "" {
-			return config{}, errors.New("--list-tools does not accept --session")
+			return config{}, errors.New("audit commands do not accept --session")
 		}
 		if visited["no-session"] {
-			return config{}, errors.New("--list-tools does not accept --no-session")
+			return config{}, errors.New("audit commands do not accept --no-session")
 		}
-		if cfg.extensions == nil || cfg.extensions.MCP == nil {
+		if cfg.listTools && (cfg.extensions == nil || cfg.extensions.MCP == nil) {
 			return config{}, errors.New("--list-tools requires extensions.mcp in the configuration")
+		}
+		if (cfg.listSkills || cfg.checkSkills) && cfg.skills == nil {
+			return config{}, errors.New(
+				"--list-skills and --check-skills require skills in the configuration",
+			)
 		}
 		return cfg, nil
 	}
@@ -596,7 +653,7 @@ func runJSON(ctx context.Context, runner conversationRunner, prompts []string, o
 	encoder := json.NewEncoder(out)
 	for _, prompt := range prompts {
 		var encodeErr error
-		_, err := runner.Run(ctx, prompt, func(event agent.Event) {
+		_, err := runner.Run(ctx, prompt, func(event observe.Event) {
 			if encodeErr != nil {
 				return
 			}
@@ -612,7 +669,39 @@ func runJSON(ctx context.Context, runner conversationRunner, prompts []string, o
 	return nil
 }
 
+func writeSkillList(
+	out io.Writer,
+	catalog, selectedCatalog *jskills.Catalog,
+) error {
+	selected := make(map[string]struct{})
+	for _, skill := range selectedCatalog.Skills() {
+		selected[skill.Name] = struct{}{}
+	}
+	writer := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	if _, err := fmt.Fprintln(writer, "SELECTED\tSKILL\tDIRECTORY\tDESCRIPTION"); err != nil {
+		return err
+	}
+	for _, skill := range catalog.Skills() {
+		marker := "no"
+		if _, exists := selected[skill.Name]; exists {
+			marker = "yes"
+		}
+		if _, err := fmt.Fprintf(
+			writer,
+			"%s\t%s\t%s\t%s\n",
+			marker,
+			skill.Name,
+			skill.Directory,
+			skill.Description,
+		); err != nil {
+			return err
+		}
+	}
+	return writer.Flush()
+}
+
 type traceEvent struct {
+	Subagent   string                 `json:"subagent,omitempty"`
 	Type       agent.EventType        `json:"type"`
 	Message    *agent.Message         `json:"message,omitempty"`
 	Delta      *agent.ModelDelta      `json:"delta,omitempty"`
@@ -634,8 +723,10 @@ type traceModelObservation struct {
 	FirstDeltaMS *int64           `json:"firstDeltaMs,omitempty"`
 }
 
-func projectEvent(event agent.Event) traceEvent {
+func projectEvent(observed observe.Event) traceEvent {
+	event := observed.Runtime
 	projected := traceEvent{
+		Subagent: observed.Subagent,
 		Type:     event.Type,
 		Message:  event.Message,
 		Delta:    event.Delta,

@@ -12,7 +12,7 @@ The repository currently contains:
 | [`J-mcp`](J-mcp/) | MCP server tools projected into J-agent | Implemented, experimental |
 | [`J-mem`](J-mem/) | SQLite transcripts and JSONL long-term memory | Implemented, experimental |
 | [`J-skills`](J-skills/) | Standard Agent Skills discovery and progressive loading | Implemented, experimental |
-| [`J-subagents`](J-subagents/) | Isolated foreground subagents exposed as one Tool | Implemented, experimental |
+| [`J-subagents`](J-subagents/) | Isolated, optionally resumable foreground subagents exposed as one Tool | Implemented, experimental |
 
 J-agent remains independently embeddable. Every sibling is a first-party
 example of customization, not a privileged runtime layer. Each can be replaced
@@ -71,7 +71,7 @@ them, for example [`J-agent/docs`](J-agent/docs/).
 
 ## Build
 
-Run checks for all six modules from the repository root:
+Run checks for the complete workspace from the repository root:
 
 ```bash
 make check

@@ -193,6 +193,9 @@ Add these top-level fields alongside `profiles`:
     "paths": [
       "${HOME}/.agents/skills",
       "project-skills"
+    ],
+    "include": [
+      "research"
     ]
   },
   "subagents": {
@@ -235,8 +238,9 @@ Endpoints with configured headers must be final URLs: redirects are rejected
 so credentials cannot be replayed to another origin.
 
 Direct Streamable HTTP avoids a Node/npm proxy process for a remote MCP server.
-For example, the Tavily configuration above replaces an `npx -y mcp-remote …`
-recipe while preserving the same MCP and J-agent Tool boundaries.
+The Tavily example replaces an `npx -y mcp-remote …` recipe while preserving
+the standard MCP and J-agent Tool boundaries. J deliberately does not add a
+second vendor-specific Tavily wrapper that would duplicate this capability.
 
 Omitting `tools` selects every tool advertised by that server. A non-empty
 `tools` array is an exact, case-sensitive allowlist. Startup fails when a named
@@ -266,25 +270,34 @@ on demand. J-tui does not install skill packages, search implicit locations,
 execute scripts by itself, or interpret the experimental `allowed-tools`
 field.
 
+Omitting `skills.include` selects every discovered skill. A non-empty
+`include` array selects exact, case-sensitive names; duplicates, blank names,
+and unknown names fail startup. Audit discovery and selection without
+constructing a model:
+
+```bash
+j-tui --list-skills
+j-tui --check-skills
+```
+
 Each configured subagent becomes a selectable recipe behind one
 `subagent_run` Tool. `profile` optionally selects any named model profile and
-defaults to the parent invocation's effective model connection. Every call
-uses a fresh transcript, propagates cancellation, and returns final content,
-turn count, and provider-reported usage. The `tools` field is an exact,
-case-sensitive selection from Bash, memory, selected MCP tools, and
-`skill_read`: omitting it inherits all those non-subagent tools, while `[]`
-creates a model-only subagent. Unknown names fail startup.
+defaults to the parent invocation's effective model connection. The `tools`
+field is an exact, case-sensitive selection from Bash, memory, selected MCP
+tools, and `skill_read`: omitting it inherits all those non-subagent tools,
+while `[]` creates a model-only subagent. Unknown names fail startup.
 
 Subagents run in the foreground and calls using the same recipe are serialized.
 J-tui does not add a `J-delegate` layer, background jobs, parallel/chain
-orchestration, recursive tool inheritance, or subagent transcript persistence.
-Nested model usage remains visible in the `subagent_run` result; it is not
-misreported as usage of the parent model call.
+orchestration, recursive tool inheritance, or a generic child registry. Their
+existing J-agent lifecycle events stream into the TUI and JSON trace with the
+configured subagent name. Child output and usage remain visually distinct and
+are not misreported as usage of the parent model call.
 
 When `memory.transcript` is configured, every normal invocation creates a new
 session ID, writes an empty SQLite snapshot immediately, displays the ID in the
-TUI header, and persists the complete transcript after each successful run.
-This matches Pi's default of a new persisted session rather than silently
+TUI header, and persists the accepted user turn plus each complete model/tool
+turn. This matches Pi's default of a new persisted session rather than silently
 resuming an older conversation.
 
 Restore and continue one exact session explicitly:
@@ -298,6 +311,21 @@ session is created empty. `J_TUI_SESSION` provides the environment equivalent.
 Use `--no-session` for one intentionally ephemeral invocation even when
 transcript memory is configured. Supplying a session without
 `memory.transcript`, or combining `--session` with `--no-session`, is rejected.
+
+When the parent uses `memory.transcript`, each new subagent call also receives a
+host-generated child `session` ID and stores complete child checkpoints in the
+same database. A later `subagent_run` can pass that exact ID to continue the
+same configured child, including after J-tui restarts and restores the parent
+session. With `--no-session`, subagents retain the simpler fresh-transcript
+behavior.
+
+Recovery is deliberately checkpoint-based. The root and J-subagents save the
+accepted user turn and every complete model/tool turn, and failed subagent calls
+return their child session ID so continuation is explicit. Neither path
+automatically replays an interrupted provider stream or partially observed Tool
+call.
+Abrupt-process-crash discovery, background jobs, exactly-once side effects, and
+automatic retry remain outside this foreground design.
 
 Long-term memory is independent of transcript sessions. When configured, it
 adds `memory_retrieve`, `memory_store`, `memory_modify`, and `memory_forget` as
@@ -457,10 +485,12 @@ go run ./cmd/j-tui \
   "Use bash to run pwd, then report the output."
 ```
 
-Each output line is one projection of `agent.Event`. Event names and payloads
-remain J-agent's own contract. Durations are represented as `durationMs` for
-inspection. The command is experimental and is intended to verify event order,
-streaming deltas, tool lifecycle, failures, and terminal state.
+Each output line is one projection of `agent.Event`. Root events omit
+`subagent`; child events carry the configured subagent name. Event names and
+payloads remain J-agent's own contract. Durations are represented as
+`durationMs` for inspection. The command is experimental and is intended to
+verify event order, streaming deltas, tool lifecycle, failures, and terminal
+state.
 
 JSON mode includes reasoning deltas and tool output when the runtime emits
 them. Treat its stdout as sensitive local diagnostic data.
@@ -479,7 +509,7 @@ The TUI reducer keeps this mapping private to J-tui:
 | text `message.delta` | responding with streamed transcript text |
 | tool-call `message.delta` | preparing tool |
 | `tool.started`, `tool.completed` | named tool row with running/result/failure |
-| `turn.completed` | model duration, first-delta timing, and usage become observable |
+| `turn.completed` | root and child model duration, first-delta timing, and usage remain distinct |
 | `agent.completed` | ready for the next prompt |
 | failed lifecycle event | explicit failed state and error |
 | canceled `context.Context` | canceled state |

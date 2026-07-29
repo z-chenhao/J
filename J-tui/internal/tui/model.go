@@ -14,12 +14,13 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/z-chenhao/J/J-agent/agent"
+	"github.com/z-chenhao/J/J-tui/internal/observe"
 )
 
 const maxInputHeight = 5
 
 type runner interface {
-	Run(context.Context, string, agent.EventHandler) (agent.RunResult, error)
+	Run(context.Context, string, observe.Handler) (agent.RunResult, error)
 }
 
 type itemKind uint8
@@ -49,7 +50,7 @@ type transcriptItem struct {
 }
 
 type eventMsg struct {
-	event agent.Event
+	event observe.Event
 }
 
 type runDoneMsg struct {
@@ -79,11 +80,12 @@ type Model struct {
 	height   int
 
 	items            []transcriptItem
-	activeMessage    int
+	activeMessages   map[string]int
 	activeTools      map[string]int
 	reasoningBytes   int
 	status           string
 	runMetrics       runMetrics
+	subagentMetrics  map[string]runMetrics
 	running          bool
 	cancel           context.CancelFunc
 	events           chan tea.Msg
@@ -141,8 +143,9 @@ func New(
 		spinner:          progress,
 		width:            80,
 		height:           24,
-		activeMessage:    -1,
+		activeMessages:   make(map[string]int),
 		activeTools:      make(map[string]int),
+		subagentMetrics:  make(map[string]runMetrics),
 		status:           "ready",
 		initialPrompt:    strings.TrimSpace(initialPrompt),
 		followOutput:     true,
@@ -250,7 +253,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 
 	case eventMsg:
-		m.applyEvent(msg.event)
+		m.applyObservedEvent(msg.event)
 		m.syncViewport()
 		return m, waitForEvent(m.events)
 
@@ -270,7 +273,7 @@ func (m Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "ready"
 		}
-		m.activeMessage = -1
+		m.activeMessages = make(map[string]int)
 		m.syncViewport()
 		return m, nil
 	}
@@ -292,8 +295,9 @@ func (m Model) submit(prompt string) (tea.Model, tea.Cmd) {
 	m.status = "starting"
 	m.runMetrics = runMetrics{}
 	m.reasoningBytes = 0
-	m.activeMessage = -1
+	m.activeMessages = make(map[string]int)
 	m.activeTools = make(map[string]int)
+	m.subagentMetrics = make(map[string]runMetrics)
 	m.followOutput = true
 	m.input.Reset()
 	m.resize()
@@ -308,7 +312,7 @@ func (m Model) submit(prompt string) (tea.Model, tea.Cmd) {
 func startRun(ctx context.Context, runner runner, prompt string, events chan tea.Msg) tea.Cmd {
 	return func() tea.Msg {
 		go func() {
-			_, err := runner.Run(ctx, prompt, func(event agent.Event) {
+			_, err := runner.Run(ctx, prompt, func(event observe.Event) {
 				select {
 				case events <- eventMsg{event: event}:
 				case <-ctx.Done():
@@ -331,105 +335,147 @@ func waitForEvent(events <-chan tea.Msg) tea.Cmd {
 }
 
 func (m *Model) applyEvent(event agent.Event) {
+	m.applyObservedEvent(observe.Event{Runtime: event})
+}
+
+func (m *Model) applyObservedEvent(observed observe.Event) {
+	event := observed.Runtime
+	source := observed.Subagent
+	label := "j"
+	if source != "" {
+		label = source
+	}
 	switch event.Type {
 	case agent.EventAgentStarted:
-		m.status = "running"
+		m.status = scopedStatus(source, "running")
 	case agent.EventTurnStarted:
-		m.status = "thinking"
+		m.status = scopedStatus(source, "thinking")
 	case agent.EventMessageStarted:
-		m.status = "streaming"
+		m.status = scopedStatus(source, "streaming")
 		m.items = append(m.items, transcriptItem{
-			kind: itemAssistant, label: "j", status: "streaming",
+			kind: itemAssistant, label: label, status: "streaming",
 		})
-		m.activeMessage = len(m.items) - 1
+		m.activeMessages[source] = len(m.items) - 1
 	case agent.EventMessageDelta:
 		if event.Delta == nil {
 			return
 		}
+		activeMessage, active := m.activeMessages[source]
 		switch event.Delta.Type {
 		case agent.DeltaText:
-			m.status = "responding"
-			if m.activeMessage >= 0 {
-				m.items[m.activeMessage].text += event.Delta.Delta
-				m.items[m.activeMessage].renderWidth = 0
+			m.status = scopedStatus(source, "responding")
+			if active {
+				m.items[activeMessage].text += event.Delta.Delta
+				m.items[activeMessage].renderWidth = 0
 			}
 		case agent.DeltaReasoning:
-			m.status = "thinking"
+			m.status = scopedStatus(source, "thinking")
 			m.reasoningBytes += len(event.Delta.Delta)
-			if m.activeMessage >= 0 {
-				m.items[m.activeMessage].reasoning += event.Delta.Delta
-				m.items[m.activeMessage].reasoningWidth = 0
+			if active {
+				m.items[activeMessage].reasoning += event.Delta.Delta
+				m.items[activeMessage].reasoningWidth = 0
 			}
 		case agent.DeltaToolCall:
-			m.status = "preparing tool"
+			m.status = scopedStatus(source, "preparing tool")
 		}
 	case agent.EventMessageCompleted:
-		if m.activeMessage >= 0 {
-			if event.Message != nil && m.items[m.activeMessage].text == "" {
-				m.items[m.activeMessage].text = event.Message.Text()
-				m.items[m.activeMessage].renderWidth = 0
+		activeMessage, active := m.activeMessages[source]
+		if active {
+			if event.Message != nil && m.items[activeMessage].text == "" {
+				m.items[activeMessage].text = event.Message.Text()
+				m.items[activeMessage].renderWidth = 0
 			}
 			if event.Message != nil &&
-				m.items[m.activeMessage].reasoning == "" {
-				m.items[m.activeMessage].reasoning = messageReasoning(*event.Message)
-				m.items[m.activeMessage].reasoningWidth = 0
+				m.items[activeMessage].reasoning == "" {
+				m.items[activeMessage].reasoning = messageReasoning(*event.Message)
+				m.items[activeMessage].reasoningWidth = 0
 			}
-			m.items[m.activeMessage].status = ""
-			if m.items[m.activeMessage].text == "" &&
-				strings.TrimSpace(m.items[m.activeMessage].reasoning) == "" {
-				m.items = append(m.items[:m.activeMessage], m.items[m.activeMessage+1:]...)
+			m.items[activeMessage].status = ""
+			if m.items[activeMessage].text == "" &&
+				strings.TrimSpace(m.items[activeMessage].reasoning) == "" {
+				m.items = append(m.items[:activeMessage], m.items[activeMessage+1:]...)
 			}
 		}
-		m.activeMessage = -1
-		m.status = "running"
+		delete(m.activeMessages, source)
+		m.status = scopedStatus(source, "running")
 	case agent.EventMessageFailed:
 		if m.status == "canceling" {
-			if m.activeMessage >= 0 {
-				m.items[m.activeMessage].status = "canceled"
-				m.activeMessage = -1
+			if activeMessage, active := m.activeMessages[source]; active {
+				m.items[activeMessage].status = "canceled"
+				delete(m.activeMessages, source)
 			}
 			return
 		}
-		m.finishMessageWithError(event.Error)
+		m.finishMessageWithError(source, event.Error)
 	case agent.EventToolStarted:
 		if event.ToolCall == nil {
 			return
+		}
+		toolName := event.ToolCall.Name
+		if source != "" {
+			toolName = source + " › " + toolName
 		}
 		item := transcriptItem{
 			kind:          itemTool,
 			label:         "tool",
 			status:        "running",
 			id:            event.ToolCall.ID,
-			toolName:      event.ToolCall.Name,
+			toolName:      toolName,
 			toolArguments: string(event.ToolCall.Arguments),
 		}
 		m.items = append(m.items, item)
-		m.activeTools[event.ToolCall.ID] = len(m.items) - 1
-		m.status = "tool " + event.ToolCall.Name
+		m.activeTools[scopedID(source, event.ToolCall.ID)] = len(m.items) - 1
+		m.status = scopedStatus(source, "tool "+event.ToolCall.Name)
 	case agent.EventToolCompleted:
-		m.finishTool(event)
+		m.finishTool(source, event)
 	case agent.EventTurnCompleted:
 		if event.Model != nil {
-			m.runMetrics.add(*event.Model)
+			if source == "" {
+				m.runMetrics.add(*event.Model)
+			} else {
+				metrics := m.subagentMetrics[source]
+				metrics.add(*event.Model)
+				m.subagentMetrics[source] = metrics
+			}
 		}
-		m.status = "running"
+		m.status = scopedStatus(source, "running")
 	case agent.EventTurnFailed:
 		if m.status != "canceling" {
-			m.status = "failed"
+			m.status = scopedStatus(source, "failed")
 		}
 	case agent.EventAgentCompleted:
-		m.status = "completed"
+		m.status = scopedStatus(source, "completed")
 	case agent.EventAgentFailed:
 		if m.status == "canceling" {
 			return
 		}
-		m.status = "failed"
+		m.status = scopedStatus(source, "failed")
 		if event.Error != "" && !m.hasTerminalError(event.Error) {
 			m.items = append(m.items, transcriptItem{
-				kind: itemError, label: "error", text: event.Error,
+				kind:  itemError,
+				label: "error",
+				text:  scopedError(source, event.Error),
 			})
 		}
 	}
+}
+
+func scopedStatus(subagent, status string) string {
+	if subagent == "" {
+		return status
+	}
+	return "subagent " + subagent + " " + status
+}
+
+func scopedError(subagent, message string) string {
+	if subagent == "" {
+		return message
+	}
+	return "subagent " + subagent + ": " + message
+}
+
+func scopedID(subagent, id string) string {
+	return subagent + "\x00" + id
 }
 
 func messageReasoning(message agent.Message) string {
@@ -506,28 +552,33 @@ func addObservedTokenCount(total, value *int64) *int64 {
 	return &sum
 }
 
-func (m *Model) finishMessageWithError(message string) {
-	if m.activeMessage >= 0 {
-		m.items[m.activeMessage].status = "failed"
-		if m.items[m.activeMessage].text == "" {
-			m.items[m.activeMessage].text = message
+func (m *Model) finishMessageWithError(source, message string) {
+	if activeMessage, active := m.activeMessages[source]; active {
+		m.items[activeMessage].status = "failed"
+		if m.items[activeMessage].text == "" {
+			m.items[activeMessage].text = message
 		}
-		m.activeMessage = -1
+		delete(m.activeMessages, source)
 	}
-	m.status = "failed"
+	m.status = scopedStatus(source, "failed")
 }
 
-func (m *Model) finishTool(event agent.Event) {
+func (m *Model) finishTool(source string, event agent.Event) {
 	if event.ToolCall == nil {
 		return
 	}
-	index, ok := m.activeTools[event.ToolCall.ID]
+	key := scopedID(source, event.ToolCall.ID)
+	index, ok := m.activeTools[key]
 	if !ok {
+		toolName := event.ToolCall.Name
+		if source != "" {
+			toolName = source + " › " + toolName
+		}
 		m.items = append(m.items, transcriptItem{
 			kind:          itemTool,
 			label:         "tool",
 			id:            event.ToolCall.ID,
-			toolName:      event.ToolCall.Name,
+			toolName:      toolName,
 			toolArguments: string(event.ToolCall.Arguments),
 		})
 		index = len(m.items) - 1
@@ -540,8 +591,8 @@ func (m *Model) finishTool(event agent.Event) {
 		m.items[index].status = formatDuration(event.Duration)
 		m.items[index].toolOutput = event.Output
 	}
-	delete(m.activeTools, event.ToolCall.ID)
-	m.status = "running"
+	delete(m.activeTools, key)
+	m.status = scopedStatus(source, "running")
 }
 
 func (m Model) hasTerminalError(message string) bool {

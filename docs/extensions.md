@@ -353,8 +353,10 @@ J-tui integration additionally proves:
    construction;
 4. omitted MCP configuration starts no process and exposes no MCP tools;
 5. only named environment values are forwarded beyond the documented baseline;
-6. transcript snapshots restore through `WithHistory`, and successful runs
-   persist the next complete snapshot.
+6. transcript snapshots restore through `WithHistory`, and accepted user turns
+   plus complete model/tool turns persist as restorable checkpoints;
+7. configured subagents use the same store through a parent-scoped child
+   identity without adding session or storage concepts to J-agent.
 
 A provider-backed live MCP call remains an operational smoke test rather than
 a deterministic unit test.

@@ -1,0 +1,115 @@
+{
+  "schemaVersion": "jspace.trace.v0.1",
+  "id": "demo",
+  "label": "Interface sample — not measured",
+  "createdAt": "2026-07-28T00:00:00Z",
+  "updatedAt": "2026-07-28T00:00:00Z",
+  "status": "completed",
+  "agent": {
+    "commit": "illustrative",
+    "model": "Qwen3.6-35B-A3B-oQ4e-mtp"
+  },
+  "measurement": {
+    "kind": "illustrative",
+    "probe": "interface-sample",
+    "modelCheckpoint": "Qwen/Qwen3.6-35B-A3B",
+    "runtimeQuantization": "illustrative only",
+    "lensRepository": "stanleytheli/qwen3.6-35B-A3B-jlens",
+    "contextFidelity": "authored sample; no model inference",
+    "layers": 40,
+    "residualWidth": 2048,
+    "vocabularySize": 248320
+  },
+  "events": [
+    {"sequence": 1, "offsetMs": 0, "type": "agent.start"},
+    {"sequence": 2, "offsetMs": 42, "type": "model.start", "model": "Qwen3.6-35B-A3B-oQ4e-mtp"},
+    {"sequence": 3, "offsetMs": 1340, "type": "model.end", "durationMs": 1298, "stopReason": "tool_calls"},
+    {"sequence": 4, "offsetMs": 1344, "type": "tool.start", "tool": "bash"},
+    {"sequence": 5, "offsetMs": 1421, "type": "tool.end", "durationMs": 77, "tool": "bash", "outputBytes": 284},
+    {"sequence": 6, "offsetMs": 1425, "type": "model.start", "model": "Qwen3.6-35B-A3B-oQ4e-mtp"},
+    {"sequence": 7, "offsetMs": 2792, "type": "model.end", "durationMs": 1367, "stopReason": "stop"},
+    {"sequence": 8, "offsetMs": 2794, "type": "agent.end"}
+  ],
+  "turns": [
+    {
+      "index": 0,
+      "selectedPositions": [
+        {
+          "index": -6,
+          "token": "plan",
+          "role": "assistant",
+          "layers": [
+            {"layer": 0, "region": "early", "top": [{"token": "text", "rank": 1, "score": -2.1}, {"token": "input", "rank": 2, "score": -2.5}, {"token": "parse", "rank": 3, "score": -3.0}]},
+            {"layer": 4, "region": "early", "top": [{"token": "task", "rank": 1, "score": -0.8}, {"token": "goal", "rank": 2, "score": -1.1}, {"token": "step", "rank": 3, "score": -1.6}]},
+            {"layer": 8, "region": "early", "top": [{"token": "goal", "rank": 1, "score": 0.7}, {"token": "need", "rank": 2, "score": 0.2}, {"token": "plan", "rank": 3, "score": -0.3}]},
+            {"layer": 12, "region": "workspace", "top": [{"token": "inspect", "rank": 1, "score": 2.0}, {"token": "code", "rank": 2, "score": 1.7}, {"token": "project", "rank": 3, "score": 1.1}]},
+            {"layer": 16, "region": "workspace", "top": [{"token": "verify", "rank": 1, "score": 4.2}, {"token": "implement", "rank": 2, "score": 3.8}, {"token": "test", "rank": 3, "score": 3.3}]},
+            {"layer": 20, "region": "workspace", "top": [{"token": "verify", "rank": 1, "score": 6.7}, {"token": "test", "rank": 2, "score": 5.6}, {"token": "run", "rank": 3, "score": 4.8}]},
+            {"layer": 24, "region": "workspace", "top": [{"token": "implement", "rank": 1, "score": 7.4}, {"token": "model", "rank": 2, "score": 6.2}, {"token": "local", "rank": 3, "score": 5.9}]},
+            {"layer": 28, "region": "workspace", "top": [{"token": "change", "rank": 1, "score": 6.1}, {"token": "code", "rank": 2, "score": 5.4}, {"token": "check", "rank": 3, "score": 4.9}]},
+            {"layer": 32, "region": "late", "top": [{"token": "I", "rank": 1, "score": 4.6}, {"token": "will", "rank": 2, "score": 4.1}, {"token": "first", "rank": 3, "score": 3.7}]},
+            {"layer": 36, "region": "late", "top": [{"token": "done", "rank": 1, "score": 3.8}, {"token": "result", "rank": 2, "score": 3.1}, {"token": "verified", "rank": 3, "score": 2.6}]},
+            {"layer": 39, "region": "late", "top": [{"token": "answer", "rank": 1, "score": 3.4}, {"token": "summary", "rank": 2, "score": 2.8}, {"token": "next", "rank": 3, "score": 2.5}]}
+          ]
+        },
+        {
+          "index": -5,
+          "token": "inspect",
+          "role": "assistant",
+          "layers": [
+            {"layer": 0, "region": "early", "top": [{"token": "look", "rank": 1, "score": -2.4}, {"token": "read", "rank": 2, "score": -2.7}, {"token": "find", "rank": 3, "score": -3.1}]},
+            {"layer": 4, "region": "early", "top": [{"token": "file", "rank": 1, "score": -0.4}, {"token": "code", "rank": 2, "score": -0.9}, {"token": "state", "rank": 3, "score": -1.2}]},
+            {"layer": 8, "region": "early", "top": [{"token": "model", "rank": 1, "score": 1.4}, {"token": "runtime", "rank": 2, "score": 1.0}, {"token": "trace", "rank": 3, "score": 0.7}]},
+            {"layer": 12, "region": "workspace", "top": [{"token": "evidence", "rank": 1, "score": 3.1}, {"token": "state", "rank": 2, "score": 2.8}, {"token": "source", "rank": 3, "score": 2.2}]},
+            {"layer": 16, "region": "workspace", "top": [{"token": "model", "rank": 1, "score": 5.1}, {"token": "internal", "rank": 2, "score": 4.9}, {"token": "activation", "rank": 3, "score": 4.2}]},
+            {"layer": 20, "region": "workspace", "top": [{"token": "Jacobian", "rank": 1, "score": 7.1}, {"token": "lens", "rank": 2, "score": 6.6}, {"token": "direction", "rank": 3, "score": 5.8}]},
+            {"layer": 24, "region": "workspace", "top": [{"token": "J-space", "rank": 1, "score": 8.2}, {"token": "state", "rank": 2, "score": 7.7}, {"token": "concept", "rank": 3, "score": 6.1}]},
+            {"layer": 28, "region": "workspace", "top": [{"token": "observe", "rank": 1, "score": 6.8}, {"token": "compare", "rank": 2, "score": 5.9}, {"token": "model", "rank": 3, "score": 5.0}]},
+            {"layer": 32, "region": "late", "top": [{"token": "show", "rank": 1, "score": 5.2}, {"token": "readout", "rank": 2, "score": 4.5}, {"token": "layer", "rank": 3, "score": 3.9}]},
+            {"layer": 36, "region": "late", "top": [{"token": "result", "rank": 1, "score": 4.1}, {"token": "evidence", "rank": 2, "score": 3.8}, {"token": "note", "rank": 3, "score": 3.2}]},
+            {"layer": 39, "region": "late", "top": [{"token": "report", "rank": 1, "score": 3.5}, {"token": "clear", "rank": 2, "score": 3.0}, {"token": "limit", "rank": 3, "score": 2.5}]}
+          ]
+        },
+        {
+          "index": -4,
+          "token": "model",
+          "role": "assistant",
+          "layers": [
+            {"layer": 0, "region": "early", "top": [{"token": "model", "rank": 1, "score": -1.8}, {"token": "token", "rank": 2, "score": -2.3}, {"token": "layer", "rank": 3, "score": -2.8}]},
+            {"layer": 4, "region": "early", "top": [{"token": "network", "rank": 1, "score": 0.1}, {"token": "context", "rank": 2, "score": -0.2}, {"token": "prompt", "rank": 3, "score": -0.7}]},
+            {"layer": 8, "region": "early", "top": [{"token": "residual", "rank": 1, "score": 1.9}, {"token": "layer", "rank": 2, "score": 1.5}, {"token": "token", "rank": 3, "score": 1.0}]},
+            {"layer": 12, "region": "workspace", "top": [{"token": "feature", "rank": 1, "score": 3.9}, {"token": "matrix", "rank": 2, "score": 3.5}, {"token": "timeline", "rank": 3, "score": 2.8}]},
+            {"layer": 16, "region": "workspace", "top": [{"token": "layer", "rank": 1, "score": 5.7}, {"token": "token", "rank": 2, "score": 5.2}, {"token": "direction", "rank": 3, "score": 4.7}]},
+            {"layer": 20, "region": "workspace", "top": [{"token": "concept", "rank": 1, "score": 7.6}, {"token": "direction", "rank": 2, "score": 7.2}, {"token": "layer", "rank": 3, "score": 6.4}]},
+            {"layer": 24, "region": "workspace", "top": [{"token": "concept", "rank": 1, "score": 8.7}, {"token": "matrix", "rank": 2, "score": 7.9}, {"token": "token", "rank": 3, "score": 7.0}]},
+            {"layer": 28, "region": "workspace", "top": [{"token": "observation", "rank": 1, "score": 7.0}, {"token": "replay", "rank": 2, "score": 6.4}, {"token": "result", "rank": 3, "score": 5.8}]},
+            {"layer": 32, "region": "late", "top": [{"token": "show", "rank": 1, "score": 5.9}, {"token": "each", "rank": 2, "score": 4.8}, {"token": "layer", "rank": 3, "score": 4.2}]},
+            {"layer": 36, "region": "late", "top": [{"token": "display", "rank": 1, "score": 4.3}, {"token": "readout", "rank": 2, "score": 3.9}, {"token": "J", "rank": 3, "score": 3.2}]},
+            {"layer": 39, "region": "late", "top": [{"token": "explain", "rank": 1, "score": 3.7}, {"token": "result", "rank": 2, "score": 3.3}, {"token": "limit", "rank": 3, "score": 2.7}]}
+          ]
+        },
+        {
+          "index": -3,
+          "token": "state",
+          "role": "assistant",
+          "layers": [
+            {"layer": 0, "region": "early", "top": [{"token": "state", "rank": 1, "score": -2.0}, {"token": "value", "rank": 2, "score": -2.4}, {"token": "vector", "rank": 3, "score": -2.9}]},
+            {"layer": 4, "region": "early", "top": [{"token": "hidden", "rank": 1, "score": -0.1}, {"token": "residual", "rank": 2, "score": -0.6}, {"token": "layer", "rank": 3, "score": -1.0}]},
+            {"layer": 8, "region": "early", "top": [{"token": "activation", "rank": 1, "score": 1.6}, {"token": "feature", "rank": 2, "score": 1.2}, {"token": "signal", "rank": 3, "score": 0.7}]},
+            {"layer": 12, "region": "workspace", "top": [{"token": "concept", "rank": 1, "score": 3.4}, {"token": "direction", "rank": 2, "score": 3.0}, {"token": "evidence", "rank": 3, "score": 2.5}]},
+            {"layer": 16, "region": "workspace", "top": [{"token": "goal", "rank": 1, "score": 5.4}, {"token": "plan", "rank": 2, "score": 4.9}, {"token": "constraint", "rank": 3, "score": 4.6}]},
+            {"layer": 20, "region": "workspace", "top": [{"token": "goal", "rank": 1, "score": 7.2}, {"token": "evidence", "rank": 2, "score": 6.8}, {"token": "constraint", "rank": 3, "score": 6.1}]},
+            {"layer": 24, "region": "workspace", "top": [{"token": "verify", "rank": 1, "score": 8.4}, {"token": "goal", "rank": 2, "score": 8.0}, {"token": "result", "rank": 3, "score": 7.1}]},
+            {"layer": 28, "region": "workspace", "top": [{"token": "answer", "rank": 1, "score": 6.9}, {"token": "evidence", "rank": 2, "score": 6.0}, {"token": "limit", "rank": 3, "score": 5.5}]},
+            {"layer": 32, "region": "late", "top": [{"token": "therefore", "rank": 1, "score": 5.5}, {"token": "result", "rank": 2, "score": 5.0}, {"token": "because", "rank": 3, "score": 4.5}]},
+            {"layer": 36, "region": "late", "top": [{"token": "finding", "rank": 1, "score": 4.4}, {"token": "observed", "rank": 2, "score": 3.9}, {"token": "may", "rank": 3, "score": 3.4}]},
+            {"layer": 39, "region": "late", "top": [{"token": "answer", "rank": 1, "score": 3.8}, {"token": "note", "rank": 2, "score": 3.3}, {"token": "caution", "rank": 3, "score": 2.8}]}
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Illustrative interface data only; not generated by a model or J-lens."
+  ]
+}

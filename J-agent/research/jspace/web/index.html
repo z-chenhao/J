@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="J-Space — inspect Jacobian-lens observations from local J-agent runs.">
+  <title>J-Space</title>
+  <link rel="stylesheet" href="/jspace/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Skip to workspace</a>
+  <div class="page-shell">
+    <header class="masthead">
+      <a class="wordmark" href="/jspace/" aria-label="J-Space home">J / SPACE</a>
+      <div class="masthead-meta">
+        <span class="status-dot" id="connection-dot" aria-hidden="true"></span>
+        <span id="connection-label">Public demo</span>
+        <button class="text-button" id="access-button" type="button">Open observations</button>
+      </div>
+    </header>
+
+    <main id="workspace">
+      <section class="intro" aria-labelledby="page-title">
+        <div>
+          <p class="eyebrow">JACOBIAN-LENS READOUT</p>
+          <h1 id="page-title">Model internal state</h1>
+          <p class="lede">Post-hoc replay of a local J-agent run. Not chain-of-thought.</p>
+        </div>
+        <dl class="run-facts" aria-label="Current measurement">
+          <div>
+            <dt>Run</dt>
+            <dd id="fact-run">DEMO</dd>
+          </div>
+          <div>
+            <dt>Model</dt>
+            <dd id="fact-model">QWEN 3.6 · 35B A3B</dd>
+          </div>
+          <div>
+            <dt>Mode</dt>
+            <dd id="fact-kind">ILLUSTRATIVE</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="runbar" aria-label="Run selection">
+        <label for="run-select">Observation</label>
+        <select id="run-select" aria-label="Select an observation">
+          <option value="demo">Interface demo · not measured</option>
+        </select>
+        <div class="run-state">
+          <span id="run-status">DEMO</span>
+          <time id="run-time">—</time>
+        </div>
+      </section>
+
+      <section class="instrument" aria-labelledby="map-heading">
+        <div class="instrument-head">
+          <div>
+            <p class="section-index">01</p>
+            <h2 id="map-heading">Layer × token</h2>
+          </div>
+          <div class="turn-controls">
+            <button id="previous-turn" type="button" aria-label="Previous model turn">←</button>
+            <span id="turn-label">TURN 01 / 01</span>
+            <button id="next-turn" type="button" aria-label="Next model turn">→</button>
+          </div>
+        </div>
+
+        <div class="field-layout">
+          <div class="field-main">
+            <div class="field-axis-label">
+              <span>Earlier token</span>
+              <span>Selected positions</span>
+              <span>Later token</span>
+            </div>
+            <div class="canvas-wrap" id="canvas-wrap">
+              <canvas id="jspace-canvas" aria-label="J-Space layer by token heatmap"></canvas>
+              <div class="canvas-empty" id="canvas-empty" hidden>No J-lens readout.</div>
+            </div>
+            <div class="token-axis" id="token-axis" aria-hidden="true"></div>
+            <div class="legend" aria-label="Heatmap legend">
+              <span><i class="legend-swatch low"></i>Low</span>
+              <span><i class="legend-swatch high"></i>High</span>
+              <span class="legend-note">Top J-lens direction per cell</span>
+            </div>
+          </div>
+
+          <aside class="inspector" aria-labelledby="inspector-heading">
+            <p class="section-index">SELECTED</p>
+            <h3 id="inspector-heading"><span id="selected-layer">L24</span> × <span id="selected-position">P−03</span></h3>
+            <p class="selected-token" id="selected-token">“reason”</p>
+            <ol class="concept-list" id="concept-list"></ol>
+            <p class="inspector-note" id="inspector-note">
+              Ranked token directions after Jacobian transport.
+            </p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="lower-grid">
+        <article class="timeline-panel" aria-labelledby="timeline-heading">
+          <div class="panel-head">
+            <div>
+              <p class="section-index">02</p>
+              <h2 id="timeline-heading">Agent timeline</h2>
+            </div>
+            <span class="live-badge" id="live-badge">RECORDED</span>
+          </div>
+          <div class="timeline" id="timeline" role="list"></div>
+        </article>
+
+        <article class="provenance-panel" aria-labelledby="provenance-heading">
+          <div class="panel-head">
+            <div>
+              <p class="section-index">03</p>
+              <h2 id="provenance-heading">Provenance</h2>
+            </div>
+          </div>
+          <dl class="provenance" id="provenance"></dl>
+          <details>
+            <summary>Measurement limits</summary>
+            <p>
+              The live model API does not expose activations. Measurements come from
+              replaying recorded model frames through the same local checkpoint, then
+              applying a fitted J-lens.
+            </p>
+          </details>
+        </article>
+      </section>
+    </main>
+
+    <footer>
+      <p>Experimental · read-only</p>
+      <a href="https://github.com/anthropics/jacobian-lens" rel="noreferrer">Method</a>
+    </footer>
+  </div>
+
+  <dialog id="access-dialog" aria-labelledby="access-title">
+    <form id="access-form" method="dialog">
+      <button class="dialog-close" value="cancel" aria-label="Close">×</button>
+      <p class="section-index">PRIVATE DATA</p>
+      <h2 id="access-title">Open observations</h2>
+      <p>The viewer token stays in this browser tab.</p>
+      <label for="access-token">Viewer token</label>
+      <input id="access-token" name="token" type="password" autocomplete="off" spellcheck="false" required>
+      <p class="form-error" id="access-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button class="primary-button" value="submit">Connect</button>
+        <button class="secondary-button" id="demo-button" value="cancel">Use demo</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/jspace/app.js" defer></script>
+</body>
+</html>

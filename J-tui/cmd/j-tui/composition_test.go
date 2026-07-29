@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -221,6 +222,167 @@ func TestComposeRuntimeLoadsSkillsAndRunsConfiguredSubagent(t *testing.T) {
 		decoded.Usage.TotalTokens != 10 || requests.Load() != 1 {
 		t.Fatalf("subagent output=%q requests=%d", subagentOutput, requests.Load())
 	}
+}
+
+func TestComposeRuntimeResumesPersistedSubagentSession(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		requestNumber := requests.Add(1)
+		var payload struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		wantContents := []string{"Keep child context.", "first"}
+		if requestNumber == 2 {
+			wantContents = append(wantContents, "answer 1", "second")
+		}
+		if len(payload.Messages) != len(wantContents) {
+			t.Errorf("request %d messages=%#v", requestNumber, payload.Messages)
+		} else {
+			for index, content := range wantContents {
+				if payload.Messages[index].Content != content {
+					t.Errorf(
+						"request %d message %d=%#v",
+						requestNumber,
+						index,
+						payload.Messages[index],
+					)
+				}
+			}
+		}
+		writer.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintf(
+			writer,
+			"data: {\"id\":\"child-%d\",\"model\":\"child-model\",\"choices\":[{\"delta\":{\"content\":\"answer %d\"},\"finish_reason\":\"stop\"}]}\n\n"+
+				"data: [DONE]\n\n",
+			requestNumber,
+			requestNumber,
+		)
+	}))
+	defer server.Close()
+
+	configPath := filepath.Join(t.TempDir(), ".j", "config.json")
+	cfg := config{
+		configPath:      configPath,
+		session:         "parent-session",
+		provider:        "openai",
+		api:             "openai-completions",
+		model:           "child-model",
+		baseURL:         server.URL + "/v1",
+		reasoningField:  "omit",
+		reasoningEffort: "default",
+		memory: &settings.Memory{
+			Transcript: &settings.MemoryFile{Path: "state/transcripts.db"},
+		},
+		subagents: &settings.Subagents{
+			Agents: map[string]settings.Subagent{
+				"research": {
+					Description:  "Research one bounded question.",
+					SystemPrompt: "Keep child context.",
+					Tools:        []string{},
+				},
+			},
+		},
+	}
+
+	firstComposition, err := composeRuntime(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstTool := findTool(t, firstComposition.tools, "subagent_run")
+	firstOutput, err := firstTool.Call(
+		context.Background(),
+		json.RawMessage(`{"agent":"research","task":"first"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first struct {
+		Session string `json:"session"`
+	}
+	if err := json.Unmarshal([]byte(firstOutput), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Session == "" {
+		t.Fatalf("first output=%s", firstOutput)
+	}
+	if err := firstComposition.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	secondComposition, err := composeRuntime(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondComposition.Close()
+	secondTool := findTool(t, secondComposition.tools, "subagent_run")
+	secondOutput, err := secondTool.Call(
+		context.Background(),
+		json.RawMessage(
+			`{"agent":"research","task":"second","session":"`+
+				first.Session+`"}`,
+		),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var second struct {
+		Session string `json:"session"`
+		Resumed bool   `json:"resumed"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(secondOutput), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Session != first.Session || !second.Resumed ||
+		second.Content != "answer 2" || requests.Load() != 2 {
+		t.Fatalf("second output=%s requests=%d", secondOutput, requests.Load())
+	}
+}
+
+func TestLoadConfiguredSkillsAppliesExactSelection(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ".j", "config.json")
+	root := filepath.Join(filepath.Dir(configPath), "skills")
+	for _, name := range []string{"alpha", "beta"} {
+		directory := filepath.Join(root, name)
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(
+			filepath.Join(directory, "SKILL.md"),
+			[]byte("---\nname: "+name+"\ndescription: "+name+" skill.\n---\n"),
+			0o600,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	all, selected, err := loadConfiguredSkills(configPath, &settings.Skills{
+		Paths:   []string{"skills"},
+		Include: []string{"beta"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Skills()) != 2 || len(selected.Skills()) != 1 ||
+		selected.Skills()[0].Name != "beta" {
+		t.Fatalf("all=%#v selected=%#v", all.Skills(), selected.Skills())
+	}
+}
+
+func findTool(t *testing.T, tools []agent.Tool, name string) agent.Tool {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Spec().Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("tool %q not found", name)
+	return nil
 }
 
 func TestComposeRuntimeRejectsUnknownSubagentTool(t *testing.T) {
@@ -573,7 +735,8 @@ func TestPersistentRunnerSavesAndRestoresTranscript(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := &persistentRunner{
-		runner:    agentRunner,
+		runner:    newObservedRunner(agentRunner, composition.subagents),
+		history:   agentRunner.History,
 		store:     composition.transcripts,
 		sessionID: cfg.session,
 	}
@@ -600,6 +763,43 @@ func TestPersistentRunnerSavesAndRestoresTranscript(t *testing.T) {
 		agent.WithHistory(restored.history...),
 	); err != nil {
 		t.Fatalf("restored Agent failed: %v", err)
+	}
+}
+
+func TestPersistentRunnerSavesAcceptedUserCheckpointOnFailedRun(t *testing.T) {
+	cfg := config{
+		configPath: filepath.Join(t.TempDir(), ".j", "config.json"),
+		session:    "stable-checkpoint",
+		memory: &settings.Memory{
+			Transcript: &settings.MemoryFile{Path: "state/transcripts.db"},
+		},
+	}
+	composition, err := composeRuntime(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer composition.Close()
+	agentRunner, err := agent.New(failingModel{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := &persistentRunner{
+		runner:    newObservedRunner(agentRunner, composition.subagents),
+		history:   agentRunner.History,
+		store:     composition.transcripts,
+		sessionID: cfg.session,
+	}
+	if _, err := runner.Run(context.Background(), "checkpoint this user turn", nil); err == nil {
+		t.Fatal("failed run unexpectedly succeeded")
+	}
+	history, err := composition.transcripts.Load(context.Background(), cfg.session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 ||
+		history[0].Role != agent.RoleUser ||
+		history[0].Text() != "checkpoint this user turn" {
+		t.Fatalf("accepted user checkpoint=%#v", history)
 	}
 }
 

@@ -105,7 +105,8 @@ func TestLoadTypedSkillsAndSubagentsConfiguration(t *testing.T) {
 			}
 		},
 		"skills": {
-			"paths": ["${HOME}/.agents/skills", "project-skills"]
+			"paths": ["${HOME}/.agents/skills", "project-skills"],
+			"include": ["research"]
 		},
 		"subagents": {
 			"agents": {
@@ -127,7 +128,9 @@ func TestLoadTypedSkillsAndSubagentsConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(file.Skills.Paths) != 2 ||
-		file.Skills.Paths[0] != "${HOME}/.agents/skills" {
+		file.Skills.Paths[0] != "${HOME}/.agents/skills" ||
+		len(file.Skills.Include) != 1 ||
+		file.Skills.Include[0] != "research" {
 		t.Fatalf("skills=%#v", file.Skills)
 	}
 	research := file.Subagents.Agents["research"]
@@ -320,6 +323,16 @@ func TestLoadRejectsInvalidSkillsAndSubagentsConfiguration(t *testing.T) {
 			"defaultProfile":"local",
 			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
 			"skills":{"paths":["skills","skills"]}
+		}`,
+		"empty skill include": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"skills":{"paths":["skills"],"include":[]}
+		}`,
+		"duplicate skill include": `{
+			"defaultProfile":"local",
+			"profiles":{"local":{"provider":"openai","model":"qwen","baseURL":"http://localhost/v1"}},
+			"skills":{"paths":["skills"],"include":["one","one"]}
 		}`,
 		"empty subagents": `{
 			"defaultProfile":"local",

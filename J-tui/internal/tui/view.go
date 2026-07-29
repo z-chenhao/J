@@ -144,6 +144,12 @@ func (m Model) renderTranscript() string {
 				Render(content))
 		case itemAssistant:
 			var sections []string
+			if item.label != "" && item.label != "j" {
+				sections = append(
+					sections,
+					m.styles.accent.Render("subagent "+safeTerminalText(item.label)),
+				)
+			}
 			if strings.TrimSpace(item.reasoning) != "" {
 				if m.thinkingExpanded {
 					content := item.reasoningView
@@ -291,6 +297,24 @@ func (m Model) footer() string {
 				)
 			}
 		}
+	}
+	childTurns := 0
+	childTokens := int64(0)
+	childUsageComplete := true
+	for _, metrics := range m.subagentMetrics {
+		childTurns += metrics.turns
+		if !metrics.usageComplete || metrics.usage == nil {
+			childUsageComplete = false
+			continue
+		}
+		childTokens += metrics.usage.TotalTokens
+	}
+	if childTurns > 0 {
+		childSummary := fmt.Sprintf("subagents %d turns", childTurns)
+		if childUsageComplete {
+			childSummary += fmt.Sprintf(" / %d tokens", childTokens)
+		}
+		parts = append(parts, childSummary)
 	}
 	return strings.Join(parts, "  ·  ")
 }

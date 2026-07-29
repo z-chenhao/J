@@ -73,7 +73,8 @@ type MemoryFile struct {
 
 // Skills describes explicitly configured Agent Skills roots.
 type Skills struct {
-	Paths []string `json:"paths"`
+	Paths   []string `json:"paths"`
+	Include []string `json:"include,omitempty"`
 }
 
 // Subagents contains J-tui's explicitly named foreground subagent recipes.
@@ -534,6 +535,19 @@ func (skills *Skills) validate() error {
 			return fmt.Errorf("skills repeats path %q", path)
 		}
 		seen[path] = struct{}{}
+	}
+	if skills.Include != nil && len(skills.Include) == 0 {
+		return errors.New("skills.include must be omitted or contain at least one skill name")
+	}
+	selected := make(map[string]struct{}, len(skills.Include))
+	for _, name := range skills.Include {
+		if name == "" || name != strings.TrimSpace(name) {
+			return fmt.Errorf("skill name %q must be non-empty and trimmed", name)
+		}
+		if _, exists := selected[name]; exists {
+			return fmt.Errorf("skills repeats included name %q", name)
+		}
+		selected[name] = struct{}{}
 	}
 	return nil
 }

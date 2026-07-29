@@ -10,12 +10,12 @@ COPY J-skills/go.mod J-skills/go.sum J-skills/
 COPY J-subagents/go.mod J-subagents/
 COPY J-tui/go.mod J-tui/go.sum J-tui/
 
-RUN cd J-agent && go mod download
-RUN cd J-mcp && go mod download
-RUN cd J-mem && go mod download
-RUN cd J-skills && go mod download
-RUN cd J-subagents && go mod download
-RUN cd J-tui && go mod download
+RUN cd J-agent && GOWORK=off go mod download
+RUN cd J-mcp && GOWORK=off go mod download
+RUN cd J-mem && GOWORK=off go mod download
+RUN cd J-skills && GOWORK=off go mod download
+RUN cd J-subagents && GOWORK=off go mod download
+RUN cd J-tui && GOWORK=off go mod download
 
 COPY J-agent J-agent
 COPY J-mcp J-mcp
