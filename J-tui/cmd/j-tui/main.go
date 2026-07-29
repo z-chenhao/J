@@ -21,6 +21,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/provider/openai"
+	jpackages "github.com/z-chenhao/J/J-packages"
 	jskills "github.com/z-chenhao/J/J-skills"
 	"github.com/z-chenhao/J/J-tui/internal/observe"
 	"github.com/z-chenhao/J/J-tui/internal/settings"
@@ -28,31 +29,33 @@ import (
 )
 
 type config struct {
-	configPath      string
-	profile         string
-	initConfig      bool
-	listTools       bool
-	listSkills      bool
-	checkSkills     bool
-	mode            string
-	provider        string
-	api             string
-	apiVersion      string
-	model           string
-	baseURL         string
-	apiKey          string
-	reasoningField  string
-	reasoningEffort string
-	session         string
-	noSession       bool
-	profiles        map[string]settings.Profile
-	extensions      *settings.Extensions
-	memory          *settings.Memory
-	skills          *settings.Skills
-	subagents       *settings.Subagents
-	jspaceURL       string
-	jspaceToken     string
-	prompts         []string
+	configPath       string
+	profile          string
+	initConfig       bool
+	listTools        bool
+	listSkills       bool
+	checkSkills      bool
+	mode             string
+	provider         string
+	api              string
+	apiVersion       string
+	model            string
+	baseURL          string
+	apiKey           string
+	reasoningField   string
+	reasoningEffort  string
+	session          string
+	noSession        bool
+	profiles         map[string]settings.Profile
+	extensions       *settings.Extensions
+	memory           *settings.Memory
+	skills           *settings.Skills
+	subagents        *settings.Subagents
+	packagesRegistry string
+	noPackages       bool
+	jspaceURL        string
+	jspaceToken      string
+	prompts          []string
 }
 
 var version = "dev"
@@ -97,7 +100,15 @@ func run(ctx context.Context, args []string, out io.Writer) (runErr error) {
 		return writeMCPToolList(out, composition.mcpTools)
 	}
 	if cfg.listSkills || cfg.checkSkills {
-		catalog, selected, err := loadConfiguredSkills(cfg.configPath, cfg.skills)
+		packageRoots, err := packageSkillRoots(cfg)
+		if err != nil {
+			return err
+		}
+		catalog, selected, err := loadConfiguredSkills(
+			cfg.configPath,
+			cfg.skills,
+			packageRoots,
+		)
 		if err != nil {
 			return err
 		}
@@ -275,6 +286,18 @@ func parseConfig(args []string) (config, error) {
 		false,
 		"disable transcript persistence for this invocation",
 	)
+	flags.StringVar(
+		&values.packagesRegistry,
+		"packages-registry",
+		"",
+		"installed J Package registry path",
+	)
+	flags.BoolVar(
+		&values.noPackages,
+		"no-packages",
+		false,
+		"disable installed J Packages for this invocation",
+	)
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -284,6 +307,10 @@ func parseConfig(args []string) (config, error) {
 	})
 
 	defaultPath, err := settings.DefaultPath()
+	if err != nil {
+		return config{}, err
+	}
+	defaultPackagesRegistry, err := jpackages.DefaultRegistryPath()
 	if err != nil {
 		return config{}, err
 	}
@@ -307,6 +334,11 @@ func parseConfig(args []string) (config, error) {
 		if visited["no-session"] {
 			return config{}, errors.New("--init-config does not accept --no-session")
 		}
+		if visited["packages-registry"] || visited["no-packages"] {
+			return config{}, errors.New(
+				"--init-config does not accept --packages-registry or --no-packages",
+			)
+		}
 		if values.listTools {
 			return config{}, errors.New("--init-config does not accept --list-tools")
 		}
@@ -323,16 +355,18 @@ func parseConfig(args []string) (config, error) {
 	}
 
 	cfg := config{
-		configPath:      configPath,
-		listTools:       values.listTools,
-		listSkills:      values.listSkills,
-		checkSkills:     values.checkSkills,
-		noSession:       values.noSession,
-		mode:            "tui",
-		provider:        "openai",
-		api:             string(openai.APICompletions),
-		reasoningField:  "omit",
-		reasoningEffort: "default",
+		configPath:       configPath,
+		listTools:        values.listTools,
+		listSkills:       values.listSkills,
+		checkSkills:      values.checkSkills,
+		noSession:        values.noSession,
+		noPackages:       values.noPackages,
+		packagesRegistry: defaultPackagesRegistry,
+		mode:             "tui",
+		provider:         "openai",
+		api:              string(openai.APICompletions),
+		reasoningField:   "omit",
+		reasoningEffort:  "default",
 	}
 	profileName := env("J_TUI_PROFILE")
 	if visited["profile"] {
@@ -386,6 +420,7 @@ func parseConfig(args []string) (config, error) {
 	cfg.session = strings.TrimSpace(cfg.session)
 	cfg.jspaceURL = strings.TrimSpace(cfg.jspaceURL)
 	cfg.jspaceToken = strings.TrimSpace(cfg.jspaceToken)
+	cfg.packagesRegistry = strings.TrimSpace(cfg.packagesRegistry)
 	auditModes := 0
 	for _, enabled := range []bool{cfg.listTools, cfg.listSkills, cfg.checkSkills} {
 		if enabled {
@@ -409,14 +444,6 @@ func parseConfig(args []string) (config, error) {
 		}
 		if visited["no-session"] {
 			return config{}, errors.New("audit commands do not accept --no-session")
-		}
-		if cfg.listTools && (cfg.extensions == nil || cfg.extensions.MCP == nil) {
-			return config{}, errors.New("--list-tools requires extensions.mcp in the configuration")
-		}
-		if (cfg.listSkills || cfg.checkSkills) && cfg.skills == nil {
-			return config{}, errors.New(
-				"--list-skills and --check-skills require skills in the configuration",
-			)
 		}
 		return cfg, nil
 	}
@@ -572,16 +599,17 @@ func loadSettings(path string) (settings.File, bool, error) {
 
 func applyEnvironment(cfg *config, apiKeySpecified *bool) {
 	for name, target := range map[string]*string{
-		"J_TUI_PROVIDER":         &cfg.provider,
-		"J_TUI_API":              &cfg.api,
-		"J_TUI_API_VERSION":      &cfg.apiVersion,
-		"J_TUI_MODEL":            &cfg.model,
-		"J_TUI_BASE_URL":         &cfg.baseURL,
-		"J_TUI_REASONING_FIELD":  &cfg.reasoningField,
-		"J_TUI_REASONING_EFFORT": &cfg.reasoningEffort,
-		"J_TUI_SESSION":          &cfg.session,
-		"J_TUI_JSPACE_URL":       &cfg.jspaceURL,
-		"J_TUI_JSPACE_TOKEN":     &cfg.jspaceToken,
+		"J_TUI_PROVIDER":          &cfg.provider,
+		"J_TUI_API":               &cfg.api,
+		"J_TUI_API_VERSION":       &cfg.apiVersion,
+		"J_TUI_MODEL":             &cfg.model,
+		"J_TUI_BASE_URL":          &cfg.baseURL,
+		"J_TUI_REASONING_FIELD":   &cfg.reasoningField,
+		"J_TUI_REASONING_EFFORT":  &cfg.reasoningEffort,
+		"J_TUI_SESSION":           &cfg.session,
+		"J_TUI_JSPACE_URL":        &cfg.jspaceURL,
+		"J_TUI_JSPACE_TOKEN":      &cfg.jspaceToken,
+		"J_TUI_PACKAGES_REGISTRY": &cfg.packagesRegistry,
 	} {
 		if value := env(name); value != "" {
 			*target = value
@@ -603,17 +631,18 @@ func applyFlags(
 		target *string
 		value  string
 	}{
-		"mode":             {&cfg.mode, values.mode},
-		"provider":         {&cfg.provider, values.provider},
-		"api":              {&cfg.api, values.api},
-		"api-version":      {&cfg.apiVersion, values.apiVersion},
-		"model":            {&cfg.model, values.model},
-		"base-url":         {&cfg.baseURL, values.baseURL},
-		"reasoning-field":  {&cfg.reasoningField, values.reasoningField},
-		"reasoning-effort": {&cfg.reasoningEffort, values.reasoningEffort},
-		"session":          {&cfg.session, values.session},
-		"jspace-url":       {&cfg.jspaceURL, values.jspaceURL},
-		"jspace-token":     {&cfg.jspaceToken, values.jspaceToken},
+		"mode":              {&cfg.mode, values.mode},
+		"provider":          {&cfg.provider, values.provider},
+		"api":               {&cfg.api, values.api},
+		"api-version":       {&cfg.apiVersion, values.apiVersion},
+		"model":             {&cfg.model, values.model},
+		"base-url":          {&cfg.baseURL, values.baseURL},
+		"reasoning-field":   {&cfg.reasoningField, values.reasoningField},
+		"reasoning-effort":  {&cfg.reasoningEffort, values.reasoningEffort},
+		"session":           {&cfg.session, values.session},
+		"jspace-url":        {&cfg.jspaceURL, values.jspaceURL},
+		"jspace-token":      {&cfg.jspaceToken, values.jspaceToken},
+		"packages-registry": {&cfg.packagesRegistry, values.packagesRegistry},
 	} {
 		if visited[name] {
 			*pair.target = pair.value

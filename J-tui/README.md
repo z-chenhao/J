@@ -12,6 +12,7 @@ With Go 1.26 or newer:
 
 ```bash
 go install github.com/z-chenhao/J/J-tui/cmd/j-tui@latest
+go install github.com/z-chenhao/J/J-packages/cmd/j@latest
 ```
 
 Ensure the Go binary directory, normally `~/go/bin`, is on `PATH`.
@@ -30,7 +31,8 @@ The installer:
 - downloads only from this repository's latest GitHub Release;
 - selects the current operating system and architecture;
 - verifies the archive against the published SHA-256 checksums;
-- installs to `~/.local/bin` without requiring root.
+- installs `j-tui` and the `j package` manager to `~/.local/bin` without
+  requiring root.
 
 Set `J_TUI_INSTALL_DIR` to select another directory.
 
@@ -183,9 +185,39 @@ The endpoint and model are opaque configuration. Azure mode appends
 uses the `api-key` header. It deliberately does not provide arbitrary headers,
 query parameters, or request-body configuration.
 
-## MCP, memory, skills, and subagents
+## Packages, MCP, memory, skills, and subagents
 
-J-tui can compose optional J-mcp, J-mem, J-skills, and J-subagents
+J-tui automatically reads the explicit, user-owned J Package registry at
+`~/.j/packages.json`. A missing registry changes nothing. Install and audit a
+package with:
+
+```bash
+j package check ./my-package
+j package add ./my-package
+j package doctor
+j-tui --list-tools
+j-tui --list-skills
+```
+
+Git packages must name a ref:
+
+```bash
+j package add git:https://github.com/example/my-package.git@v1.0.0
+```
+
+Use `j package update [id]`, `j package remove <id>`, and `j package list` for
+the remaining lifecycle. Package-required environment values must be exported
+before J-tui starts. Use `--no-packages` for one package-free run or
+`--packages-registry <path>` / `J_TUI_PACKAGES_REGISTRY` to inspect another
+registry. No change to `~/.j/config.json` is required when upgrading.
+
+J Package 0.1 supports only package-owned stdio MCP servers and Agent Skills
+roots. Installation is an explicit executable-code trust decision; it is not a
+sandbox. J-tui freezes package Tools at construction time and fails on
+duplicate Tool or Skill names. See the
+[package protocol and author guide](../docs/packages.md).
+
+J-tui can also compose optional J-mcp, J-mem, J-skills, and J-subagents
 capabilities from the same typed configuration. Presence enables a capability;
 omission disables it. The starter configuration does not enable any of them.
 
@@ -304,14 +336,14 @@ configuration file. With the default `~/.j/config.json`, the example memory
 files are therefore `~/.j/state/transcripts.db` and
 `~/.j/state/memory.jsonl`.
 
-Skill paths follow the same relative-path rule and also support the
+Configured Skill paths follow the same relative-path rule and also support the
 literal-plus-`${ENV_VAR}` value syntax. J-skills recursively discovers
 directories containing a standard `SKILL.md`, validates the Agent Skills
 frontmatter, and adds one `skill_read` Tool. Only names and descriptions are
 always visible to the model; complete instructions and relative resources load
-on demand. J-tui does not install skill packages, search implicit locations,
-execute scripts by itself, or interpret the experimental `allowed-tools`
-field.
+on demand. Installed package Skill roots are added explicitly from the private
+package registry. J-tui does not search implicit locations, execute Skill
+scripts by itself, or interpret the experimental `allowed-tools` field.
 
 Omitting `skills.include` selects every discovered skill. A non-empty
 `include` array selects exact, case-sensitive names; duplicates, blank names,
@@ -576,11 +608,11 @@ J-tui owns:
 - UI-only status reduction and the experimental JSON projection.
 
 J-tui does not implement persistence, memory policy, MCP, Agent Skills parsing,
-subagent execution, model routing, plugin discovery, tool authorization, retry,
-or compaction. It composes the independent J-mem, J-mcp, J-skills, and
-J-subagents modules plus J-agent's ordinary first-party Bash Tool; no J-agent
-runtime API was added. The current event contract reports tool start and
-completion, not intermediate progress; J-tui does not invent progress that
-J-agent did not observe.
+subagent execution, model routing, package installation, tool authorization,
+retry, or compaction. It composes the independent J-mem, J-mcp, J-packages,
+J-skills, and J-subagents modules plus J-agent's ordinary first-party Bash
+Tool; no J-agent runtime API was added. The current event contract reports tool
+start and completion, not intermediate progress; J-tui does not invent
+progress that J-agent did not observe.
 
 See [the repository design](../docs/design.md).

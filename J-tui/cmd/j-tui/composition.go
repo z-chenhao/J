@@ -19,6 +19,7 @@ import (
 	jmcp "github.com/z-chenhao/J/J-mcp"
 	"github.com/z-chenhao/J/J-mem/memory"
 	"github.com/z-chenhao/J/J-mem/transcript"
+	jpackages "github.com/z-chenhao/J/J-packages"
 	jskills "github.com/z-chenhao/J/J-skills"
 	jsubagents "github.com/z-chenhao/J/J-subagents"
 	"github.com/z-chenhao/J/J-tui/internal/observe"
@@ -41,6 +42,7 @@ type runtimeComposition struct {
 	history     []agent.Message
 	transcripts *transcript.Store
 	connections []*jmcp.Connection
+	packages    *jpackages.Session
 	mcpTools    []mcpToolObservation
 	subagents   *subagentEventRelay
 }
@@ -163,6 +165,32 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 
 	}
 
+	var packageSkillRoots []string
+	if !cfg.noPackages {
+		packageSession, err := jpackages.Open(ctx, jpackages.HostConfig{
+			RegistryPath: cfg.packagesRegistry,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("initialize J Packages: %w", err)
+		}
+		composition.packages = packageSession
+		packageSkillRoots = packageSession.SkillRoots()
+		for _, information := range packageSession.ToolInfo() {
+			composition.mcpTools = append(composition.mcpTools, mcpToolObservation{
+				Server:   information.Package + "/" + information.Server,
+				Name:     information.Name,
+				Selected: information.Selected,
+			})
+		}
+		if err := composition.addTools(
+			names,
+			"J Packages",
+			packageSession.Tools()...,
+		); err != nil {
+			return nil, err
+		}
+	}
+
 	if cfg.extensions != nil && cfg.extensions.MCP != nil {
 		serverNames := sortedServerNames(cfg.extensions.MCP.Servers)
 		for _, serverName := range serverNames {
@@ -191,8 +219,12 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		}
 	}
 
-	if !cfg.listTools && cfg.skills != nil {
-		_, catalog, err := loadConfiguredSkills(cfg.configPath, cfg.skills)
+	if !cfg.listTools && (cfg.skills != nil || len(packageSkillRoots) > 0) {
+		_, catalog, err := loadConfiguredSkills(
+			cfg.configPath,
+			cfg.skills,
+			packageSkillRoots,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -268,34 +300,48 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 func loadConfiguredSkills(
 	configPath string,
 	configured *settings.Skills,
+	packageRoots []string,
 ) (*jskills.Catalog, *jskills.Catalog, error) {
-	if configured == nil {
+	if configured == nil && len(packageRoots) == 0 {
 		return nil, nil, errors.New("skills configuration is required")
 	}
-	paths := make([]string, 0, len(configured.Paths))
-	for _, configuredPath := range configured.Paths {
-		resolved, err := settings.ResolveValue(configuredPath, os.LookupEnv)
-		if err != nil {
-			return nil, nil, fmt.Errorf(
-				"resolve skill path %q: %w",
-				configuredPath,
-				err,
-			)
+	paths := append([]string(nil), packageRoots...)
+	if configured != nil {
+		for _, configuredPath := range configured.Paths {
+			resolved, err := settings.ResolveValue(configuredPath, os.LookupEnv)
+			if err != nil {
+				return nil, nil, fmt.Errorf(
+					"resolve skill path %q: %w",
+					configuredPath,
+					err,
+				)
+			}
+			paths = append(paths, resolveStatePath(configPath, resolved))
 		}
-		paths = append(paths, resolveStatePath(configPath, resolved))
 	}
 	catalog, err := jskills.Load(paths...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize skills: %w", err)
 	}
 	selected := catalog
-	if configured.Include != nil {
+	if configured != nil && configured.Include != nil {
 		selected, err = catalog.Select(configured.Include...)
 		if err != nil {
 			return nil, nil, fmt.Errorf("select skills: %w", err)
 		}
 	}
 	return catalog, selected, nil
+}
+
+func packageSkillRoots(cfg config) ([]string, error) {
+	if cfg.noPackages {
+		return nil, nil
+	}
+	roots, err := jpackages.SkillRoots(cfg.packagesRegistry)
+	if err != nil {
+		return nil, fmt.Errorf("load J Package skills: %w", err)
+	}
+	return roots, nil
 }
 
 func connectMCPServer(
@@ -586,6 +632,8 @@ func (composition *runtimeComposition) Close() error {
 		closeErr = errors.Join(closeErr, composition.connections[index].Close())
 	}
 	composition.connections = nil
+	closeErr = errors.Join(closeErr, composition.packages.Close())
+	composition.packages = nil
 	return closeErr
 }
 

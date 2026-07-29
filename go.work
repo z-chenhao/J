@@ -7,7 +7,10 @@ use (
 	./J-agent/research/jspace
 	./J-mcp
 	./J-mem
+	./J-packages
 	./J-skills
 	./J-subagents
 	./J-tui
 )
+
+replace github.com/z-chenhao/J/J-packages v0.1.0 => ./J-packages

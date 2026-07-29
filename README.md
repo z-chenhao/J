@@ -11,6 +11,7 @@ The repository currently contains:
 | [`J-tui`](J-tui/) | Minimal terminal interface and JSON event trace | Implemented, experimental |
 | [`J-mcp`](J-mcp/) | MCP server tools projected into J-agent | Implemented, experimental |
 | [`J-mem`](J-mem/) | SQLite transcripts and JSONL long-term memory | Implemented, experimental |
+| [`J-packages`](J-packages/) | Explicit MCP and Agent Skills package installation | Implemented, experimental |
 | [`J-skills`](J-skills/) | Standard Agent Skills discovery and progressive loading | Implemented, experimental |
 | [`J-subagents`](J-subagents/) | Isolated, optionally resumable foreground subagents exposed as one Tool | Implemented, experimental |
 
@@ -28,7 +29,8 @@ j-tui --init-config
 j-tui
 ```
 
-Versioned releases also publish checked archives for macOS and Linux:
+Versioned releases also publish checked archives containing `j-tui` and the
+`j package` manager for macOS and Linux:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/z-chenhao/J/main/J-tui/install.sh | sh
@@ -37,7 +39,7 @@ j-tui --init-config
 j-tui
 ```
 
-The installer places the binary in `~/.local/bin` by default. Set
+The installer places both binaries in `~/.local/bin` by default. Set
 `J_TUI_INSTALL_DIR` to choose another directory.
 
 `--init-config` creates `~/.j/config.json` with a best-effort public oMLX
@@ -49,7 +51,17 @@ so do not send secrets or private data. See the [J-tui guide](J-tui/) for the
 complete configuration and security boundary.
 
 The same typed file can explicitly configure stdio or HTTP MCP servers,
-J-mem state, Agent Skills roots, and isolated foreground subagents.
+J-mem state, Agent Skills roots, and isolated foreground subagents. Users can
+also explicitly install reusable MCP and Agent Skills packages:
+
+```bash
+export J_MEMORY_PATH="$HOME/.j/hermes-memory.jsonl"
+j package add ./examples/packages/j-hermes-memory
+j package doctor
+j-tui --list-tools
+j-tui --list-skills
+```
+
 `j-tui --session <id>` restores and persists a configured transcript, while
 long-term memory, skills, MCP, and subagents remain ordinary model-visible
 Tools. Omitting a section keeps that module disabled.
@@ -65,6 +77,7 @@ decisions, module ownership, and deliberately deferred abstractions are
 maintained in one place:
 
 - [J design and engineering decisions](docs/design.md)
+- [J Package Protocol 0.1](docs/packages.md)
 
 Component-specific protocol details remain next to the component that owns
 them, for example [`J-agent/docs`](J-agent/docs/).

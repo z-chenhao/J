@@ -16,6 +16,7 @@ import (
 
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/z-chenhao/J/J-agent/agent"
+	jpackages "github.com/z-chenhao/J/J-packages"
 	"github.com/z-chenhao/J/J-tui/internal/settings"
 )
 
@@ -93,6 +94,89 @@ func TestComposeRuntimeLoadsMCPAndLongTermMemoryTools(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(filepath.Dir(configPath), "state", "memory.jsonl")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestComposeRuntimeLoadsInstalledPackageToolsAndSkills(t *testing.T) {
+	registryPath := installTestPackage(t, "package_probe")
+	t.Setenv("FORWARDED_VALUE", "from-package")
+
+	listing, err := composeRuntime(context.Background(), config{
+		configPath:       filepath.Join(t.TempDir(), ".j", "config.json"),
+		listTools:        true,
+		packagesRegistry: registryPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listing.Close()
+	if len(listing.tools) != 1 || listing.tools[0].Spec().Name != "package_probe" {
+		t.Fatalf("tools=%v", toolNames(listing.tools))
+	}
+	if len(listing.mcpTools) != 1 || listing.mcpTools[0] != (mcpToolObservation{
+		Server:   "dev.usej.test-package/probe",
+		Name:     "package_probe",
+		Selected: true,
+	}) {
+		t.Fatalf("observations=%+v", listing.mcpTools)
+	}
+	output, err := listing.tools[0].Call(context.Background(), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output != "from-package" {
+		t.Fatalf("package tool output=%q", output)
+	}
+
+	composed, err := composeRuntime(context.Background(), config{
+		configPath:       filepath.Join(t.TempDir(), ".j", "config.json"),
+		packagesRegistry: registryPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer composed.Close()
+	if got := strings.Join(toolNames(composed.tools), ","); got != "bash,package_probe,skill_read" {
+		t.Fatalf("tools=%s", got)
+	}
+	skillOutput, err := findTool(t, composed.tools, "skill_read").Call(
+		context.Background(),
+		json.RawMessage(`{"name":"package-probe"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(skillOutput, "Package Probe") {
+		t.Fatalf("skill output=%q", skillOutput)
+	}
+}
+
+func TestComposeRuntimeCanDisableInstalledPackages(t *testing.T) {
+	registryPath := installTestPackage(t, "package_probe")
+	composition, err := composeRuntime(context.Background(), config{
+		configPath:       filepath.Join(t.TempDir(), ".j", "config.json"),
+		listTools:        true,
+		noPackages:       true,
+		packagesRegistry: registryPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer composition.Close()
+	if len(composition.tools) != 0 || len(composition.mcpTools) != 0 {
+		t.Fatalf("tools=%v observations=%+v", toolNames(composition.tools), composition.mcpTools)
+	}
+}
+
+func TestComposeRuntimeRejectsPackageToolCollision(t *testing.T) {
+	registryPath := installTestPackage(t, "bash")
+	_, err := composeRuntime(context.Background(), config{
+		configPath:       filepath.Join(t.TempDir(), ".j", "config.json"),
+		packagesRegistry: registryPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), `tool name "bash"`) ||
+		!strings.Contains(err.Error(), "J Packages") {
+		t.Fatalf("error=%v", err)
 	}
 }
 
@@ -364,7 +448,7 @@ func TestLoadConfiguredSkillsAppliesExactSelection(t *testing.T) {
 	all, selected, err := loadConfiguredSkills(configPath, &settings.Skills{
 		Paths:   []string{"skills"},
 		Include: []string{"beta"},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -383,6 +467,76 @@ func findTool(t *testing.T, tools []agent.Tool, name string) agent.Tool {
 	}
 	t.Fatalf("tool %q not found", name)
 	return nil
+}
+
+func toolNames(tools []agent.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, tool := range tools {
+		names = append(names, tool.Spec().Name)
+	}
+	return names
+}
+
+func installTestPackage(t *testing.T, toolName string) string {
+	t.Helper()
+	root := t.TempDir()
+	serverPath := filepath.Join(root, "server")
+	executable, err := os.ReadFile(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(serverPath, executable, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillRoot := filepath.Join(root, "skills", "package-probe")
+	if err := os.MkdirAll(skillRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(skillRoot, "SKILL.md"),
+		[]byte("---\nname: package-probe\ndescription: Probe one installed package.\n---\n\n# Package Probe\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{
+		"schemaVersion":"j.package.v0.1",
+		"id":"dev.usej.test-package",
+		"version":"1.0.0",
+		"contributes":{
+			"mcp":[{
+				"id":"probe",
+				"command":"./server",
+				"args":["-test.run=^TestMCPStdioHelper$"],
+				"env":[
+					"J_TUI_MCP_TEST_SERVER",
+					"J_TUI_MCP_TOOL_NAME",
+					"FORWARDED_VALUE"
+				],
+				"tools":["` + toolName + `"]
+			}],
+			"skills":["skills"]
+		}
+	}`
+	if err := os.WriteFile(
+		filepath.Join(root, jpackages.ManifestFilename),
+		[]byte(manifest),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	registryPath := filepath.Join(t.TempDir(), "packages.json")
+	manager, err := jpackages.NewManager(registryPath, filepath.Join(t.TempDir(), "cache"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("J_TUI_MCP_TEST_SERVER", "1")
+	t.Setenv("J_TUI_MCP_TOOL_NAME", toolName)
+	t.Setenv("FORWARDED_VALUE", "from-package")
+	if _, err := manager.Add(context.Background(), root); err != nil {
+		t.Fatal(err)
+	}
+	return registryPath
 }
 
 func TestComposeRuntimeRejectsUnknownSubagentTool(t *testing.T) {

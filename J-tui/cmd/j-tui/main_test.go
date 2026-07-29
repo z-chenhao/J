@@ -444,6 +444,34 @@ func TestRunAuditsConfiguredSkillsWithoutStartingModel(t *testing.T) {
 	}
 }
 
+func TestRunAuditsInstalledPackageSkillsWithoutConfig(t *testing.T) {
+	isolateConfig(t)
+	registryPath := installTestPackage(t, "package_probe")
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{
+		"--packages-registry", registryPath,
+		"--list-skills",
+	}, &output); err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"package-probe", "yes"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("package skill list missing %q:\n%s", expected, output.String())
+		}
+	}
+
+	output.Reset()
+	if err := run(context.Background(), []string{
+		"--packages-registry", registryPath,
+		"--check-skills",
+	}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "Validated 1 skills; 1 selected.\n" {
+		t.Fatalf("check output=%q", output.String())
+	}
+}
+
 func TestRunListsAdvertisedAndSelectedMCPToolsWithoutModel(t *testing.T) {
 	isolateConfig(t)
 	t.Setenv("J_TUI_MCP_TEST_SERVER", "1")
@@ -529,6 +557,41 @@ func TestParseConfigRejectsListToolsWithConversationArguments(t *testing.T) {
 				t.Fatal("incompatible list-tools arguments were accepted")
 			}
 		})
+	}
+}
+
+func TestParseConfigAppliesPackageRegistryPrecedence(t *testing.T) {
+	home := isolateConfig(t)
+	defaultRegistry := filepath.Join(home, ".j", "packages.json")
+	cfg, err := parseConfig([]string{"--list-tools"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.packagesRegistry != defaultRegistry || cfg.noPackages {
+		t.Fatalf("default package config=%#v", cfg)
+	}
+
+	environmentRegistry := filepath.Join(t.TempDir(), "environment.json")
+	t.Setenv("J_TUI_PACKAGES_REGISTRY", environmentRegistry)
+	cfg, err = parseConfig([]string{"--list-tools"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.packagesRegistry != environmentRegistry {
+		t.Fatalf("environment registry=%q", cfg.packagesRegistry)
+	}
+
+	flagRegistry := filepath.Join(t.TempDir(), "flag.json")
+	cfg, err = parseConfig([]string{
+		"--list-tools",
+		"--packages-registry", flagRegistry,
+		"--no-packages",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.packagesRegistry != flagRegistry || !cfg.noPackages {
+		t.Fatalf("flag package config=%#v", cfg)
 	}
 }
 
@@ -946,6 +1009,7 @@ func isolateConfig(t *testing.T) string {
 		"J_TUI_SESSION",
 		"J_TUI_JSPACE_URL",
 		"J_TUI_JSPACE_TOKEN",
+		"J_TUI_PACKAGES_REGISTRY",
 	} {
 		t.Setenv(name, "")
 	}
