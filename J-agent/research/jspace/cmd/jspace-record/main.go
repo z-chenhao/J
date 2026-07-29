@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -20,6 +19,7 @@ import (
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/provider/openai"
 	"github.com/z-chenhao/J/J-agent/research/jspace/internal/artifact"
+	"github.com/z-chenhao/J/J-agent/research/jspace/internal/replay"
 	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
 )
 
@@ -55,27 +55,8 @@ type observingModel struct {
 	frames []probeFrame
 }
 
-type probeFrame struct {
-	Request  agent.ModelRequest  `json:"request"`
-	Response agent.ModelResponse `json:"response"`
-}
-
-type probeInput struct {
-	SchemaVersion string       `json:"schemaVersion"`
-	ModelPath     string       `json:"modelPath"`
-	LensPath      string       `json:"lensPath"`
-	ModelID       string       `json:"modelId"`
-	ModelRepo     string       `json:"modelRepository"`
-	LensRepo      string       `json:"lensRepository"`
-	TailPositions int          `json:"tailPositions"`
-	Frames        []probeFrame `json:"frames"`
-}
-
-type probeOutput struct {
-	Measurement artifact.Measurement `json:"measurement"`
-	Turns       []artifact.Turn      `json:"turns"`
-	Notes       []string             `json:"notes,omitempty"`
-}
+type probeFrame = replay.Frame
+type probeOutput = replay.Output
 
 type omlxSettings struct {
 	Auth struct {
@@ -312,53 +293,23 @@ func parseConfig(arguments []string) (config, error) {
 }
 
 func runProbe(ctx context.Context, config config, frames []probeFrame) (probeOutput, error) {
-	input := probeInput{
-		SchemaVersion: artifact.SchemaVersion,
+	measured, err := replay.Run(ctx, replay.Config{
+		Python:        config.probePython,
+		Script:        config.probeScript,
 		ModelPath:     config.modelPath,
 		LensPath:      config.lensPath,
 		ModelID:       config.model,
 		ModelRepo:     defaultModelRepo,
 		LensRepo:      defaultLensRepo,
 		TailPositions: config.tailPositions,
-		Frames:        frames,
-	}
-	content, err := json.Marshal(input)
+	}, frames)
 	if err != nil {
 		return probeOutput{}, err
-	}
-	command := exec.CommandContext(ctx, config.probePython, config.probeScript)
-	command.Stdin = bytes.NewReader(content)
-	var stderr bytes.Buffer
-	command.Stderr = &limitedWriter{writer: &stderr, remaining: 32 << 10}
-	output, err := command.Output()
-	if err != nil {
-		return probeOutput{}, fmt.Errorf("run J-lens probe: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
-	var measured probeOutput
-	if err := json.Unmarshal(output, &measured); err != nil {
-		return probeOutput{}, fmt.Errorf("decode J-lens probe output: %w", err)
 	}
 	if measured.Measurement.Kind != "posthoc_replay" {
 		return probeOutput{}, fmt.Errorf("probe returned measurement kind %q", measured.Measurement.Kind)
 	}
 	return measured, nil
-}
-
-type limitedWriter struct {
-	writer    *bytes.Buffer
-	remaining int
-}
-
-func (writer *limitedWriter) Write(content []byte) (int, error) {
-	original := len(content)
-	if writer.remaining > 0 {
-		if len(content) > writer.remaining {
-			content = content[:writer.remaining]
-		}
-		_, _ = writer.writer.Write(content)
-		writer.remaining -= len(content)
-	}
-	return original, nil
 }
 
 func loadAPIKey(config config) (string, error) {

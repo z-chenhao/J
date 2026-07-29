@@ -106,6 +106,45 @@ features, multi-token concept dictionaries, or steering vectors. The gateway
 does not become a general hosting framework. The artifact schema is not a
 stable J protocol.
 
+## Remote capture boundary
+
+Concrete requirement: a J-tui using the public home-model endpoint from another
+computer must create the same truthful post-hoc observation without copying the
+checkpoint or lens to that computer.
+
+Invariant mechanism:
+
+- J-tui captures its root model request/response frames and lifecycle events.
+- an authenticated, bounded experimental request durably hands one completed
+  run to the home J-Space inbox;
+- one local worker replays the frames and writes the existing artifact schema;
+- delivery and replay failures remain explicit and retryable.
+
+Current policy:
+
+- capture is opt-in;
+- the capture token is distinct from the read-only viewer token;
+- raw capture frames exist only in mode-0600 outbox/inbox files until accepted
+  and measured;
+- one worker serializes replay to protect local model memory;
+- only the validated Qwen profile is accepted.
+
+The experimental `jspace.capture.v0.1` request is shared only between J-tui and
+this research module. It is not a J-agent contract and is not generalized into
+telemetry, tracing, arbitrary artifact upload, or a provider-wide hook. Root
+model frames are measured; subagent lifecycle events may be displayed, but
+subagent model frames are deliberately not combined across potentially
+different checkpoints.
+
+Rejected alternatives:
+
+- capturing every anonymous public model request would permit untrusted callers
+  to trigger expensive replay;
+- requiring MLX and the lens on each J-tui client would duplicate sensitive,
+  machine-specific research state;
+- exposing a generic write API would widen the stable surface before a second
+  consumer validates it.
+
 ## Tradeoffs and risks
 
 - Replay adds latency and may create memory pressure because the quantized
@@ -114,9 +153,9 @@ stable J protocol.
 - Top vocabulary tokens are lossy labels for an overcomplete sparse frame.
 - Token-gated public access still exposes semantic summaries to anyone holding
   the token; rotation and non-persistence are therefore important.
-- Keeping public submission disabled means remote work can inspect but not
-  start new runs. This is intentional until a stronger authorization and tool
-  sandbox exist.
+- A capture credential allows its holder to schedule expensive local replay,
+  so it is separate from viewing, rate limited, and should be rotated after
+  disclosure.
 
 ## Validation
 

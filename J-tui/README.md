@@ -91,6 +91,49 @@ project-operated model host. Do not send secrets or private data. Replace its
 `baseURL` with your own OpenAI-compatible endpoint whenever you need a private
 or reliable deployment.
 
+### Automatic J-Space observation
+
+J-tui can explicitly send one completed root Agent run to the J-Space replay
+service that owns the local Qwen checkpoint and fitted lens. This lets a J-tui
+running on another computer create an observation without installing MLX,
+model weights, or the lens on that computer.
+
+Add the experimental capture sink to `~/.j/config.json`:
+
+```json
+{
+  "jspace": {
+    "url": "https://usej-model.tailb0426d.ts.net/jspace/api/captures",
+    "captureToken": "${JSPACE_CAPTURE_TOKEN}"
+  }
+}
+```
+
+Then export the separate capture credential before starting J-tui:
+
+```bash
+export JSPACE_CAPTURE_TOKEN="..."
+j-tui
+```
+
+The same settings are available as `J_TUI_JSPACE_URL` and
+`J_TUI_JSPACE_TOKEN`, or as `--jspace-url` and `--jspace-token`. Capture is off
+unless both values are configured. Viewer credentials cannot submit captures.
+
+Completed model frames and safe lifecycle metadata are sent over HTTPS. If
+delivery fails, J-tui writes the capture mode-0600 under
+`~/.j/jspace-outbox/` and retries queued captures on the next run. The receiving
+service keeps raw frames only in its private inbox until replay finishes; the
+published artifact does not retain the transcript. J-lens turns currently
+cover root-model frames, while the Agent timeline may also include subagent
+events.
+
+Check the installed release with:
+
+```bash
+j-tui --version
+```
+
 Export `DEEPSEEK_API_KEY` when the DeepSeek profile is selected. `apiKey` is an
 ordinary string and may contain one or more `${ENV_VAR}`
 references. A literal key is also accepted, so the configuration is not bound

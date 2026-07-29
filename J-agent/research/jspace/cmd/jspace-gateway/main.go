@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,9 @@ import (
 	"time"
 
 	jspaceauth "github.com/z-chenhao/J/J-agent/research/jspace/internal/auth"
+	jspacecapture "github.com/z-chenhao/J/J-agent/research/jspace/internal/capture"
+	"github.com/z-chenhao/J/J-agent/research/jspace/internal/replay"
+	jspaceprobe "github.com/z-chenhao/J/J-agent/research/jspace/probe"
 )
 
 const (
@@ -25,8 +29,13 @@ const (
 	defaultModelUpstream  = "http://127.0.0.1:8000"
 	defaultJSpaceUpstream = "http://127.0.0.1:8090"
 	maxRequestBytes       = 2 << 20
+	maxCaptureBytes       = 8 << 20
 	modelRequestsPerMin   = 20
 	viewRequestsPerMin    = 120
+	captureRequestsPerMin = 12
+	supportedModel        = "Qwen3.6-35B-A3B-oQ4e-mtp"
+	defaultModelRepo      = "Qwen/Qwen3.6-35B-A3B"
+	defaultLensRepo       = "stanleytheli/qwen3.6-35B-A3B-jlens"
 )
 
 type settings struct {
@@ -51,12 +60,15 @@ type statusWriter struct {
 }
 
 type gateway struct {
-	modelProxy  http.Handler
-	jspaceProxy http.Handler
-	viewerToken string
-	modelLimit  *limiter
-	viewLimit   *limiter
-	modelActive chan struct{}
+	modelProxy   http.Handler
+	jspaceProxy  http.Handler
+	viewerToken  string
+	captureToken string
+	capture      *jspacecapture.Service
+	modelLimit   *limiter
+	viewLimit    *limiter
+	captureLimit *limiter
+	modelActive  chan struct{}
 }
 
 func main() {
@@ -93,6 +105,53 @@ func buildGateway() (http.Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load J-Space viewer token: %w", err)
 	}
+	captureTokenFile := envOrDefault(
+		"JSPACE_CAPTURE_TOKEN_FILE",
+		filepath.Join(home, ".j", "jspace", "capture-token"),
+	)
+	captureToken, err := jspaceauth.LoadOrCreate(captureTokenFile)
+	if err != nil {
+		return nil, fmt.Errorf("load J-Space capture token: %w", err)
+	}
+	stateDirectory := envOrDefault(
+		"JSPACE_STATE_DIR",
+		filepath.Join(home, ".j", "jspace"),
+	)
+	probeScript, err := jspaceprobe.Install(filepath.Join(stateDirectory, "runtime"))
+	if err != nil {
+		return nil, err
+	}
+	captureService, err := jspacecapture.New(jspacecapture.Config{
+		StateDir:       stateDirectory,
+		SupportedModel: supportedModel,
+		Replay: replay.Config{
+			Python: envOrDefault(
+				"JSPACE_PROBE_PYTHON",
+				"/opt/homebrew/opt/omlx/libexec/bin/python3.11",
+			),
+			Script: probeScript,
+			ModelPath: envOrDefault(
+				"JSPACE_MODEL_PATH",
+				filepath.Join(home, ".omlx", "models", "Jundot", supportedModel),
+			),
+			LensPath: envOrDefault(
+				"JSPACE_LENS_PATH",
+				filepath.Join(
+					stateDirectory,
+					"lenses",
+					"qwen3.6-35B-A3B",
+					"lens.pt",
+				),
+			),
+			ModelID:       supportedModel,
+			ModelRepo:     defaultModelRepo,
+			LensRepo:      defaultLensRepo,
+			TailPositions: 18,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
 	modelUpstream, err := url.Parse(envOrDefault("J_GATEWAY_UPSTREAM", defaultModelUpstream))
 	if err != nil {
 		return nil, fmt.Errorf("parse model upstream: %w", err)
@@ -104,13 +163,17 @@ func buildGateway() (http.Handler, error) {
 		return nil, fmt.Errorf("parse J-Space upstream: %w", err)
 	}
 	application := &gateway{
-		modelProxy:  reverseProxy(modelUpstream, modelKey),
-		jspaceProxy: reverseProxy(jspaceUpstream, ""),
-		viewerToken: viewerToken,
-		modelLimit:  &limiter{windows: make(map[string]rateWindow)},
-		viewLimit:   &limiter{windows: make(map[string]rateWindow)},
-		modelActive: make(chan struct{}, 1),
+		modelProxy:   reverseProxy(modelUpstream, modelKey),
+		jspaceProxy:  reverseProxy(jspaceUpstream, ""),
+		viewerToken:  viewerToken,
+		captureToken: captureToken,
+		capture:      captureService,
+		modelLimit:   &limiter{windows: make(map[string]rateWindow)},
+		viewLimit:    &limiter{windows: make(map[string]rateWindow)},
+		captureLimit: &limiter{windows: make(map[string]rateWindow)},
+		modelActive:  make(chan struct{}, 1),
 	}
+	go captureService.Run(context.Background())
 	return application, nil
 }
 
@@ -135,7 +198,7 @@ func (application *gateway) ServeHTTP(writer http.ResponseWriter, request *http.
 			writeJSONError(tracked, http.StatusTooManyRequests, "rate limit exceeded")
 			return
 		}
-		if err := boundBody(request); err != nil {
+		if err := boundBody(request, maxRequestBytes); err != nil {
 			writeJSONError(tracked, http.StatusRequestEntityTooLarge, err.Error())
 			return
 		}
@@ -167,6 +230,50 @@ func (application *gateway) ServeHTTP(writer http.ResponseWriter, request *http.
 		}
 		tracked.Header().Set("Cache-Control", "no-store")
 		application.jspaceProxy.ServeHTTP(tracked, request)
+	case routeJSpaceCapture:
+		if !jspaceauth.Equal(
+			jspaceauth.Bearer(request.Header.Get("Authorization")),
+			application.captureToken,
+		) {
+			tracked.Header().Set("WWW-Authenticate", `Bearer realm="J-Space capture"`)
+			writeJSONError(tracked, http.StatusUnauthorized, "capture token required")
+			return
+		}
+		if !application.captureLimit.allow(
+			clientIP(request),
+			started,
+			captureRequestsPerMin,
+		) {
+			tracked.Header().Set("Retry-After", "60")
+			writeJSONError(tracked, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
+		if err := boundBody(request, maxCaptureBytes); err != nil {
+			writeJSONError(tracked, http.StatusRequestEntityTooLarge, err.Error())
+			return
+		}
+		var captured jspacecapture.Run
+		decoder := json.NewDecoder(request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&captured); err != nil {
+			writeJSONError(tracked, http.StatusBadRequest, "invalid capture")
+			return
+		}
+		if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			writeJSONError(tracked, http.StatusBadRequest, "invalid capture")
+			return
+		}
+		if err := application.capture.Enqueue(request.Context(), captured); err != nil {
+			writeJSONError(tracked, http.StatusBadRequest, err.Error())
+			return
+		}
+		tracked.Header().Set("Cache-Control", "no-store")
+		tracked.Header().Set("Content-Type", "application/json; charset=utf-8")
+		tracked.WriteHeader(http.StatusAccepted)
+		_ = json.NewEncoder(tracked).Encode(map[string]string{
+			"id":     captured.ID,
+			"status": "probing",
+		})
 	default:
 		writeJSONError(tracked, http.StatusNotFound, "not found")
 	}
@@ -179,6 +286,7 @@ const (
 	routeModel
 	routeJSpacePage
 	routeJSpaceAPI
+	routeJSpaceCapture
 )
 
 func classify(method, path string) route {
@@ -195,6 +303,8 @@ func classify(method, path string) route {
 		return routeJSpacePage
 	case method == http.MethodGet && strings.HasPrefix(path, "/jspace/api/"):
 		return routeJSpaceAPI
+	case method == http.MethodPost && path == "/jspace/api/captures":
+		return routeJSpaceCapture
 	default:
 		return routeDenied
 	}
@@ -235,16 +345,16 @@ func reverseProxyWithTransport(
 	return proxy
 }
 
-func boundBody(request *http.Request) error {
+func boundBody(request *http.Request, maximum int64) error {
 	if request.Body == nil {
 		return nil
 	}
-	body, err := io.ReadAll(io.LimitReader(request.Body, maxRequestBytes+1))
+	body, err := io.ReadAll(io.LimitReader(request.Body, maximum+1))
 	_ = request.Body.Close()
 	if err != nil {
 		return errors.New("invalid request body")
 	}
-	if len(body) > maxRequestBytes {
+	if int64(len(body)) > maximum {
 		return errors.New("request body too large")
 	}
 	request.Body = io.NopCloser(bytes.NewReader(body))

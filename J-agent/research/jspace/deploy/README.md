@@ -10,11 +10,15 @@ Tailscale Funnel :443
        /v1/models                  -> 127.0.0.1:8000
        /v1/chat/completions        -> 127.0.0.1:8000
        /jspace/* GET/HEAD only     -> 127.0.0.1:8090
+       /jspace/api/captures POST   -> private local replay queue
 ```
 
 `jspace-server` and `jspace-gateway` bind only to loopback. The gateway
 preserves the existing model paths and model-key injection. J-Space uses a
 different viewer token at `~/.j/jspace/access-token`.
+Authenticated remote capture uses an independent mode-0600 token at
+`~/.j/jspace/capture-token`; possession of one token never grants the other
+capability.
 
 ## Install or update
 
@@ -37,9 +41,10 @@ For an update, use `launchctl bootout` on the J-Space service before
 `bootstrap`. Keep a copy of the previous gateway binary until both the model
 routes and J-Space routes pass verification.
 
-Do not place the viewer token in a plist, command argument, URL, repository,
-shell history, or log. Read it directly from its mode-0600 file when pasting it
-into the page.
+Do not place viewer or capture tokens in a plist, command argument, URL,
+repository, shell history, or log. Read the viewer token directly from its
+mode-0600 file when pasting it into the page. Transfer the capture token to a
+trusted J-tui client through an appropriate secret channel.
 
 ## Verify
 
@@ -70,6 +75,13 @@ curl -i -X POST https://usej-model.tailb0426d.ts.net/jspace/api/runs
 Expected status codes are `200`, `401`, and `404`. Also re-check
 `GET /v1/models` and one short authenticated model request so a viewer
 deployment never silently regresses the existing public model service.
+
+The gateway creates `~/.j/jspace/capture-token` on first start. A valid
+`POST /jspace/api/captures` returns `202`; missing, viewer-only, or invalid
+credentials return `401`. Captures are bounded to 8 MiB and twelve accepted
+requests per client per minute. The embedded replay program is installed into
+private runtime state automatically, so deployment does not depend on the
+source checkout.
 
 ## Rollback
 

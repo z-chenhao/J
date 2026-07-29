@@ -944,10 +944,25 @@ func isolateConfig(t *testing.T) string {
 		"J_TUI_REASONING_FIELD",
 		"J_TUI_REASONING_EFFORT",
 		"J_TUI_SESSION",
+		"J_TUI_JSPACE_URL",
+		"J_TUI_JSPACE_TOKEN",
 	} {
 		t.Setenv(name, "")
 	}
 	return home
+}
+
+func TestVersionDoesNotRequireConfiguration(t *testing.T) {
+	previous := version
+	version = "0.1.10-test"
+	t.Cleanup(func() { version = previous })
+	var output bytes.Buffer
+	if err := run(context.Background(), []string{"--version"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.String() != "j-tui 0.1.10-test\n" {
+		t.Fatalf("output=%q", output.String())
+	}
 }
 
 func writeConfig(t *testing.T, path, contents string) {

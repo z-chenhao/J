@@ -459,6 +459,54 @@ func TestDefaultPath(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsAuthenticatedJSpaceCapture(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, path, `{
+		"defaultProfile":"local",
+		"profiles":{
+			"local":{
+				"provider":"openai",
+				"model":"qwen",
+				"baseURL":"https://model.example/v1"
+			}
+		},
+		"jspace":{
+			"url":"https://model.example/jspace/api/captures",
+			"captureToken":"${JSPACE_CAPTURE_TOKEN}"
+		}
+	}`)
+	file, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if file.JSpace == nil ||
+		file.JSpace.URL != "https://model.example/jspace/api/captures" ||
+		file.JSpace.CaptureToken != "${JSPACE_CAPTURE_TOKEN}" {
+		t.Fatalf("jspace=%#v", file.JSpace)
+	}
+}
+
+func TestLoadRejectsInsecureJSpaceCapture(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	writeTestFile(t, path, `{
+		"defaultProfile":"local",
+		"profiles":{
+			"local":{
+				"provider":"openai",
+				"model":"qwen",
+				"baseURL":"https://model.example/v1"
+			}
+		},
+		"jspace":{
+			"url":"http://model.example/jspace/api/captures",
+			"captureToken":"secret"
+		}
+	}`)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "HTTPS") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
 func writeTestFile(t *testing.T, path, contents string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
