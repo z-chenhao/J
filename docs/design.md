@@ -12,7 +12,7 @@ J explores one question:
 > What is the smallest truthful agent runtime that remains easy to customize?
 
 J is the umbrella repository. J-agent is its independently embeddable runtime
-kernel. J-tui, J-mcp, J-mem, J-skills, and J-subagents are first-party
+kernel. J-tui, J-mcp, J-mem, J-packages, J-skills, and J-subagents are first-party
 consumers used to prove that the public seams are sufficient for real
 customization.
 
@@ -22,7 +22,7 @@ direction. That identity is implemented as an independent workbench under
 other consumers and does not make model internals a runtime responsibility.
 
 Current verified consumers of J-agent are its reference CLI, private JSONL
-runtime, J-tui, J-mcp, J-mem, J-skills, and J-subagents. One OpenAI
+runtime, J-tui, J-mcp, J-mem, J-packages, J-skills, and J-subagents. One OpenAI
 Provider exercises the model seam through OpenAI-compatible and Azure OpenAI
 Chat Completions protocols; the backing servers do not count as independent
 `Model` implementations. J-tui consumes the public event and cancellation
@@ -114,6 +114,7 @@ J/
 ├── J-tui/     terminal presentation and interaction
 ├── J-mcp/     MCP client lifecycle and Tool projection
 ├── J-mem/     local persistence and memory tools
+├── J-packages/ explicit package installation and product-host composition
 ├── J-skills/  Agent Skills validation and progressive resource loading
 ├── J-subagents/ isolated foreground child Agents projected as a Tool
 └── docs/      repository-level design decisions
@@ -121,8 +122,8 @@ J/
 
 Dependency rules:
 
-- J-agent must not import J-tui, J-mcp, J-mem, J-skills, J-subagents, or future
-  J product modules.
+- J-agent must not import J-tui, J-mcp, J-mem, J-packages, J-skills,
+  J-subagents, or future J product modules.
 - Sibling product modules may depend on J-agent's experimental public Go API.
 - Sibling modules must not own each other's policy.
 - Product entrypoints compose modules; the runtime does not discover them.
@@ -493,19 +494,25 @@ proven mechanism. `J-web` remains unallocated so it can naturally name a future
 Web UI; neither that product nor a generic search-provider interface is
 promised yet.
 
-## 8. Extension composition
+## 8. Extension and package composition
 
-The current MCP requirement does not justify a universal Extension API.
-J-agent already has the required stable mechanism: construction-time Tools.
-The implemented J-mcp module initializes MCP sessions and projects their tools
-to `agent.Tool` before an Agent is constructed. The implemented product
-configuration host belongs privately to J-tui and is not part of J-mcp.
+The current package requirement does not justify a universal Extension API.
+J-agent already has the required mechanisms: construction-time Tools and
+external Agent Skills projected through a Tool. J-mcp initializes MCP sessions
+and projects their tools to `agent.Tool` before an Agent is constructed.
 
-The experimental [J Extension Composition Protocol](extensions.md) defines
-this construction lifecycle, configuration boundary, cancellation path, and
-deliberately narrow tool projection. It does not add a J-specific wire
-protocol: J-mcp speaks MCP directly. It also does not use Go runtime plugins,
-auto-discovery, runtime tool mutation, or generic configuration payloads.
+J-packages now owns the narrow shared installation and construction mechanism
+validated by J-tui and a second custom J-agent host. Its 0.1 manifest exposes
+only package-owned stdio MCP servers and Agent Skills roots. The CLI records
+explicit local paths or pinned Git sources in a user-owned private registry.
+It performs no project discovery, hidden prompt injection, or runtime mutation.
+The complete experimental contract is [J Package Protocol 0.1](packages.md).
+
+The experimental [J MCP Extension Composition Protocol](extensions.md) defines
+the direct host configuration lifecycle, cancellation path, and deliberately
+narrow tool projection. Neither direct MCP configuration nor packages add a
+J-specific wire protocol: J-mcp speaks MCP directly. They also do not use Go
+runtime plugins, runtime tool mutation, or generic configuration payloads.
 
 J-mem, J-skills, and J-subagents provide meaningfully different Tool-producing
 modules. J-mem also owns transcript lifecycle, J-skills owns resource
@@ -524,13 +531,12 @@ These names describe product modules, not promised J-agent interfaces:
 | J-mcp | Implemented independent bridge; map MCP tools to `agent.Tool`; own connection lifecycle |
 | J-skills | Implemented standard skill discovery and progressive resource Tool |
 | J-subagents | Implemented foreground isolated child Agents with optional transcript restoration |
-| J-plugins | Own discovery, trust, installation, and composition |
+| J-packages | Implemented explicit local/Git installation and MCP/Skills composition |
 | J-gateway | Map platform chat identity to external Agent/session ownership |
 
-Go's runtime plugin ABI should not be assumed to provide Pi-style TypeScript
-extension loading. J-plugins must first validate whether typed construction-time
-Go composition, external processes, or resource-only packages solve the real
-use case.
+`J-plugins` is deliberately not allocated. The implemented package protocol
+first validates whether standards-based construction-time composition solves
+the real use case before any broader plugin domain is named.
 
 ## 10. Deliberately not generalized
 
@@ -543,7 +549,7 @@ Do not add these to J-agent without a failing real integration:
 - runtime mutation of model, tools, or transcript;
 - UI rendering details on tools or messages;
 - parallel-tool, retry, compaction, or model-fleet policy;
-- a package manager or arbitrary-code loader.
+- an arbitrary-code or dynamic-library loader.
 
 Potential future mechanisms must be validated in this order:
 
@@ -569,7 +575,8 @@ Potential future mechanisms must be validated in this order:
   experimental onboarding default; public hosting policy remains outside the
   runtime and carries no availability promise.
 - J-tui owns its experimental profile file and release artifacts; J-agent does
-  not read product configuration or install packages.
+  not read product configuration or install packages. J-packages is a sibling
+  product-host module and its `j` CLI owns explicit installation.
 - J-Space is part of J's research identity and has an independent local
   workbench under `J-agent/research/`; it is not a runtime dependency or a
   model-internals promise in J-agent's public API.
@@ -583,8 +590,11 @@ Potential future mechanisms must be validated in this order:
 - Public APIs remain experimental before independent production consumers.
 - Extension hosting remains product-owned construction-time composition;
   J-agent does not discover or load extensions.
-- J-mcp, J-mem, J-skills, and J-subagents are independent Go modules; none
-  depends on J-tui.
+- J-mcp, J-mem, J-packages, J-skills, and J-subagents are independent Go
+  modules; none depends on J-tui.
+- J Package 0.1 exposes only stdio MCP and Agent Skills contributions; broader
+  plugin Hooks, UI, model, transcript, and runtime mutation surfaces remain
+  deliberately absent.
 - J-skills implements the external Agent Skills format without moving Skill
   semantics into J-agent.
 - J-subagents is the direct subagent module; J-delegate does not exist.
@@ -605,8 +615,13 @@ Potential future mechanisms must be validated in this order:
 7. Keep J-subagents' fresh and restored transcripts, parent isolation,
    complete-checkpoint persistence, explicit capability selection,
    cancellation, child event projection, and provider usage result passing.
-8. Validate provider-backed MCP and subagent calls as operational smoke tests
+8. Keep J-packages manifest confinement, private registry, explicit
+   local/pinned-Git lifecycle, MCP process, custom-host Agent loop, and
+   independent memory-package tests passing.
+9. Keep J-tui's package Tool/Skill composition, disable switch, collision
+   checks, and package-only audit commands passing.
+10. Validate provider-backed MCP and subagent calls as operational smoke tests
    without a J-agent API change.
-9. Re-audit actual integration friction before changing J-agent.
-10. Design skill/plugin distribution only after at least two resource types
-   need common discovery and trust semantics.
+11. Re-audit actual integration friction before changing J-agent.
+12. Widen J Package only after an independent package and host prove one
+   specific missing standard contribution type.

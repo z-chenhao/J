@@ -6,6 +6,7 @@ updates:
       - /J-agent
       - /J-mcp
       - /J-mem
+      - /J-packages
       - /J-skills
       - /J-subagents
       - /J-tui

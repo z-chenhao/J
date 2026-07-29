@@ -1,0 +1,28 @@
+{
+  "schemaVersion": "j.package.v0.1",
+  "id": "dev.usej.hermes-memory",
+  "version": "0.1.0",
+  "description": "An inspectable local memory package inspired by pi-hermes-memory.",
+  "contributes": {
+    "mcp": [
+      {
+        "id": "memory",
+        "command": "python3",
+        "args": [
+          "server.py"
+        ],
+        "env": [
+          "J_MEMORY_PATH"
+        ],
+        "tools": [
+          "memory_store",
+          "memory_search",
+          "memory_forget"
+        ]
+      }
+    ],
+    "skills": [
+      "skills"
+    ]
+  }
+}

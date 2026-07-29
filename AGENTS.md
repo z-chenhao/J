@@ -10,6 +10,7 @@ J is a repository of small, composable agent projects.
 - `J-tui` is a terminal consumer of J-agent.
 - `J-mcp` projects MCP servers into ordinary J-agent tools.
 - `J-mem` is optional local transcript and long-term memory.
+- `J-packages` installs explicit MCP and Agent Skills packages for product hosts.
 - `J-skills` loads standard Agent Skills progressively.
 - `J-subagents` runs isolated foreground child Agents through a tool.
 

@@ -1,7 +1,11 @@
-# J Extension Composition Protocol 0.1
+# J MCP Extension Composition Protocol 0.1
 
-Status: experimental and implemented by J-mcp plus J-tui's private
-construction-time host.
+Status: experimental and implemented by J-mcp plus J-tui's direct,
+configuration-owned MCP host.
+
+Reusable package installation is a separate layer documented by
+[J Package Protocol 0.1](packages.md). J-packages reuses this same MCP Tool
+projection rather than changing it.
 
 ## Decision summary
 
@@ -260,10 +264,11 @@ An explicitly configured stdio MCP server is executable code with the
 permissions of J-tui. An HTTP MCP server is a remote capability and data
 boundary. Neither transport is a sandbox.
 
-Version 0.1 therefore:
+Direct J-tui MCP configuration therefore:
 
 - loads only user-configured servers;
-- performs no package installation or directory auto-discovery;
+- performs no package installation or directory auto-discovery; the explicit
+  `j package` workflow is separate;
 - supplies a minimal operational process environment and forwards additional
   secret variables only when named;
 - keeps protocol stdout separate from diagnostic stderr;
@@ -277,10 +282,11 @@ J-agent importing package `agent` still grants no MCP or process capability.
 - **Audience:** repository consumers and future J-mcp contributors.
 - **Shared contract:** the construction lifecycle and projection to
   `agent.Tool`.
-- **Private implementation:** J-tui configuration loading and initial extension
-  host; J-mcp connection machinery.
-- **Stability:** experimental until J-mcp and at least one additional
-  tool-producing module validate the same lifecycle.
+- **Private implementation:** J-tui direct MCP configuration and product
+  ordering; J-mcp connection machinery.
+- **Stability:** experimental. J-packages and J-tui now validate the same
+  connection lifecycle, but independently maintained consumers are still
+  required before stabilization.
 - **Composition seam:** the already experimental `agent.Tool`, not a new core
   Extension interface.
 
@@ -295,7 +301,7 @@ Version 0.1 does not define:
 - memory, sessions, compaction, or persistence;
 - MCP task-augmented tool calls, prompts, resources, sampling, or elicitation;
 - hot reload or runtime tool mutation;
-- package discovery, installation, catalogs, or project trust;
+- catalogs, project auto-discovery, or ambient trust;
 - a J-specific JSON-RPC or JSONL extension transport;
 - arbitrary extension configuration payloads.
 
@@ -361,5 +367,6 @@ J-tui integration additionally proves:
 A provider-backed live MCP call remains an operational smoke test rather than
 a deterministic unit test.
 
-Only after a second meaningfully different tool-producing module needs the same
-host lifecycle should J extract a shared package or public Go interface.
+J-packages now extracts only the proven shared package lifecycle: explicit
+installation plus MCP Tools and Agent Skills roots. This does not justify
+widening J-mcp or J-agent with a common Extension interface.

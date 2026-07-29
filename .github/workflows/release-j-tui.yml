@@ -34,10 +34,21 @@ jobs:
         env:
           GOWORK: "off"
         run: go test ./...
+      - name: Test standalone package module
+        working-directory: J-packages
+        env:
+          GOWORK: "off"
+        run: go test ./...
       - name: Build release archives
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#J-tui/v}"
+          package_version="$(
+            cd J-tui
+            GOWORK=off go list -m -f '{{.Version}}' \
+              github.com/z-chenhao/J/J-packages
+          )"
+          package_version="${package_version#v}"
           mkdir -p dist
           for operating_system in darwin linux; do
             for architecture in amd64 arm64; do
@@ -50,7 +61,14 @@ jobs:
                   go build -trimpath -ldflags="-s -w -X main.version=${version}" \
                   -o "../${output_dir}/j-tui" ./cmd/j-tui
               )
-              tar -C "$output_dir" -czf "${output_dir}.tar.gz" j-tui
+              (
+                cd J-packages
+                GOWORK=off CGO_ENABLED=0 \
+                  GOOS="$operating_system" GOARCH="$architecture" \
+                  go build -trimpath -ldflags="-s -w -X main.version=${package_version}" \
+                  -o "../${output_dir}/j" ./cmd/j
+              )
+              tar -C "$output_dir" -czf "${output_dir}.tar.gz" j-tui j
               rm -r "$output_dir"
             done
           done

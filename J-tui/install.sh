@@ -66,8 +66,10 @@ fi
 tar -xzf "${temporary_dir}/${archive}" -C "$temporary_dir"
 mkdir -p "$install_dir"
 install -m 0755 "${temporary_dir}/j-tui" "${install_dir}/j-tui"
+install -m 0755 "${temporary_dir}/j" "${install_dir}/j"
 
 printf 'Installed j-tui to %s/j-tui\n' "$install_dir"
+printf 'Installed j package manager to %s/j\n' "$install_dir"
 case ":${PATH}:" in
 	*":${install_dir}:"*) ;;
 	*)
