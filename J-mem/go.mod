@@ -6,7 +6,7 @@ toolchain go1.26.5
 
 require (
 	github.com/z-chenhao/J/J-agent v0.0.0-20260727045356-5813cc6f3af4
-	modernc.org/sqlite v1.54.0
+	modernc.org/sqlite v1.55.0
 )
 
 require (
