@@ -41,7 +41,9 @@ j-tui
 ```
 
 The installer places both binaries in `~/.local/bin` by default. Set
-`J_TUI_INSTALL_DIR` to choose another directory.
+`J_TUI_INSTALL_DIR` to choose another directory. It targets the current J-tui
+component Release, so another module's Release cannot redirect it to unrelated
+assets.
 
 `--init-config` creates `~/.j/config.json` with a best-effort public oMLX
 profile selected by default, plus DeepSeek and Ollama alternatives. The default
