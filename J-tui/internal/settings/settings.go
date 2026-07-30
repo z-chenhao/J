@@ -16,9 +16,12 @@ import (
 
 const maxFileSize = 1 << 20
 
-var observerNamePattern = regexp.MustCompile(
-	`^[a-z0-9]+(?:[.-][a-z0-9]+)*/[a-z0-9]+(?:[.-][a-z0-9]+)*$`,
-)
+var observerNamePattern = regexp.MustCompile(`^[a-z0-9]+(?:[.-][a-z0-9]+)*$`)
+
+var observerPermissions = map[string]struct{}{
+	"agent.events": {},
+	"model.frames": {},
+}
 
 // File is J-tui's experimental configuration file.
 type File struct {
@@ -44,14 +47,17 @@ type Profile struct {
 
 // Extensions contains J-tui's typed construction-time extension recipes.
 type Extensions struct {
-	MCP       *MCP       `json:"mcp,omitempty"`
-	Observers *Observers `json:"observers,omitempty"`
+	MCP       *MCP                `json:"mcp,omitempty"`
+	Observers map[string]Observer `json:"observers,omitempty"`
 }
 
-// Observers selects exact installed J Package observer contributions. Installing
-// a package alone never grants it Agent events or model frames.
-type Observers struct {
-	Include []string `json:"include"`
+// Observer is one explicitly configured J-tui completed-run observer process.
+type Observer struct {
+	Command     string   `json:"command"`
+	Args        []string `json:"args,omitempty"`
+	Env         []string `json:"env,omitempty"`
+	CWD         string   `json:"cwd,omitempty"`
+	Permissions []string `json:"permissions"`
 }
 
 // MCP describes the explicitly configured MCP servers.
@@ -288,21 +294,63 @@ func (extensions *Extensions) validate() error {
 		return errors.New("extensions must configure mcp or observers")
 	}
 	if extensions.Observers != nil {
-		if len(extensions.Observers.Include) == 0 {
-			return errors.New("extensions.observers.include must be non-empty")
+		if len(extensions.Observers) == 0 {
+			return errors.New("extensions.observers must configure at least one observer")
 		}
-		seen := make(map[string]struct{}, len(extensions.Observers.Include))
-		for index, name := range extensions.Observers.Include {
+		for name, observer := range extensions.Observers {
 			if name != strings.TrimSpace(name) || !observerNamePattern.MatchString(name) {
 				return fmt.Errorf(
-					"extensions.observers.include[%d] must be a trimmed package/observer name",
-					index,
+					"observer name %q must be a trimmed lowercase identifier",
+					name,
 				)
 			}
-			if _, duplicate := seen[name]; duplicate {
-				return fmt.Errorf("observer %q is selected more than once", name)
+			if observer.Command == "" ||
+				observer.Command != strings.TrimSpace(observer.Command) {
+				return fmt.Errorf("observer %q command must be non-empty and trimmed", name)
 			}
-			seen[name] = struct{}{}
+			if observer.CWD != strings.TrimSpace(observer.CWD) {
+				return fmt.Errorf("observer %q cwd must be trimmed", name)
+			}
+			seenEnvironment := make(map[string]struct{}, len(observer.Env))
+			for _, variable := range observer.Env {
+				if err := validateEnvironmentName(variable); err != nil {
+					return fmt.Errorf(
+						"observer %q environment name %q: %w",
+						name,
+						variable,
+						err,
+					)
+				}
+				if _, exists := seenEnvironment[variable]; exists {
+					return fmt.Errorf(
+						"observer %q repeats environment name %q",
+						name,
+						variable,
+					)
+				}
+				seenEnvironment[variable] = struct{}{}
+			}
+			if len(observer.Permissions) == 0 {
+				return fmt.Errorf("observer %q permissions must be non-empty", name)
+			}
+			seenPermissions := make(map[string]struct{}, len(observer.Permissions))
+			for _, permission := range observer.Permissions {
+				if _, supported := observerPermissions[permission]; !supported {
+					return fmt.Errorf(
+						"observer %q requests unsupported permission %q",
+						name,
+						permission,
+					)
+				}
+				if _, exists := seenPermissions[permission]; exists {
+					return fmt.Errorf(
+						"observer %q repeats permission %q",
+						name,
+						permission,
+					)
+				}
+				seenPermissions[permission] = struct{}{}
+			}
 		}
 	}
 	if extensions.MCP == nil {

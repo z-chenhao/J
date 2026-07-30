@@ -2,12 +2,11 @@
 set -eu
 
 repository="z-chenhao/J"
-version="${JSPACE_VERSION:-0.1.0}"
+version="${JSPACE_VERSION:-0.2.0}"
 install_dir="${JSPACE_INSTALL_DIR:-${HOME}/.local/bin}"
-package_source="${JSPACE_PACKAGE_SOURCE_DIR:-${HOME}/.j/package-sources/dev.usej.jspace}"
 release_url="https://github.com/${repository}/releases/download/J-space/v${version}"
 
-for command_name in curl tar awk install j; do
+for command_name in curl tar awk install; do
 	if ! command -v "$command_name" >/dev/null 2>&1; then
 		printf >&2 'J-Space installer requires %s\n' "$command_name"
 		exit 1
@@ -66,32 +65,24 @@ if [ "$actual_checksum" != "$expected_checksum" ]; then
 fi
 
 tar -xzf "${temporary_dir}/${archive}" -C "$temporary_dir"
-mkdir -p "$install_dir" "$package_source"
+mkdir -p "$install_dir"
 for binary in jspace-observer jspace-server jspace-record jspace-gateway; do
 	install -m 0755 "${temporary_dir}/${binary}" "${install_dir}/${binary}"
 done
-install -m 0644 "${temporary_dir}/j-package.json" "${package_source}/j-package.json"
 
-installed_source="$(
-	j package list |
-		awk '$1 == "dev.usej.jspace" { print $4 }'
-)"
-case "$installed_source" in
-"")
-	j package add "local:${package_source}"
-	;;
-"local:${package_source}")
-	j package update dev.usej.jspace
-	;;
-*)
-	printf >&2 'dev.usej.jspace is already installed from %s\n' "$installed_source"
-	printf >&2 'Remove it explicitly before changing its source to %s\n' "$package_source"
-	exit 1
-	;;
-esac
+if command -v j >/dev/null 2>&1; then
+	installed_source="$(
+		j package list |
+			awk '$1 == "dev.usej.jspace" { print $4 }'
+	)"
+	if [ -n "$installed_source" ]; then
+		j package remove dev.usej.jspace
+		printf 'Unregistered legacy J Package dev.usej.jspace; cached files were retained.\n'
+	fi
+fi
 
 printf 'Installed J-Space binaries to %s\n' "$install_dir"
-printf 'Registered dev.usej.jspace from %s\n' "$package_source"
+printf 'Configure jspace-observer explicitly in ~/.j/config.json before starting j-tui.\n'
 case ":${PATH}:" in
 *":${install_dir}:"*) ;;
 *)

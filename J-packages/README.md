@@ -1,15 +1,16 @@
 # J Packages
 
 J Packages is the experimental, construction-time package host for J products.
-It installs explicit packages, validates their manifests, and projects three
+It installs explicit packages, validates their manifests, and projects two
 narrow contribution types:
 
 - stdio MCP servers as ordinary `agent.Tool` values;
 - standard Agent Skills roots;
-- explicitly selected, read-only completed-run Observers for product hosts.
 
 It does not add a Plugin interface to J-agent. Product hosts decide whether to
-load packages and how package Tools, Skills, and Observers participate.
+load packages and how package Tools and Skills participate. Product-specific
+Observers, UI, sessions, models, and providers remain outside the package
+protocol.
 
 ## Install
 
@@ -59,8 +60,7 @@ runner, err := agent.New(model, agent.WithTools(session.Tools()...))
 ```
 
 `Session.SkillRoots()` returns validated absolute roots for a host that also
-uses J-skills. `Session.ObserverSpecs()` resolves only exact observers selected
-by the host; installation alone grants no observation permission. Package Tool
-name conflicts and Observer execution remain product-host decisions.
+uses J-skills. Package Tool and Skill name conflicts remain product-host
+decisions.
 
 See [the complete package protocol](../docs/packages.md).

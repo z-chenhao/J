@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -44,7 +45,7 @@ type runtimeComposition struct {
 	connections []*jmcp.Connection
 	packages    *jpackages.Session
 	mcpTools    []mcpToolObservation
-	observers   []jpackages.ObserverSpec
+	observers   []observerSpec
 	subagents   *subagentEventRelay
 }
 
@@ -166,10 +167,15 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 
 	}
 
-	var packageSkillRoots []string
-	if cfg.noPackages && cfg.extensions != nil && cfg.extensions.Observers != nil {
-		return nil, errors.New("configured observers require installed J Packages")
+	if cfg.extensions != nil && cfg.extensions.Observers != nil {
+		observers, err := composeObservers(cfg.configPath, cfg.extensions.Observers)
+		if err != nil {
+			return nil, err
+		}
+		composition.observers = observers
 	}
+
+	var packageSkillRoots []string
 	if !cfg.noPackages {
 		packageSession, err := jpackages.Open(ctx, jpackages.HostConfig{
 			RegistryPath: cfg.packagesRegistry,
@@ -179,14 +185,6 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		}
 		composition.packages = packageSession
 		packageSkillRoots = packageSession.SkillRoots()
-		if cfg.extensions != nil && cfg.extensions.Observers != nil {
-			composition.observers, err = packageSession.ObserverSpecs(
-				cfg.extensions.Observers.Include,
-			)
-			if err != nil {
-				return nil, fmt.Errorf("select J Package observers: %w", err)
-			}
-		}
 		for _, information := range packageSession.ToolInfo() {
 			composition.mcpTools = append(composition.mcpTools, mcpToolObservation{
 				Server:   information.Package + "/" + information.Server,
@@ -362,7 +360,7 @@ func connectMCPServer(
 	server settings.MCPServer,
 ) (*jmcp.Connection, error) {
 	if server.Command != "" {
-		environment, err := mcpEnvironment(server.Env)
+		environment, err := processEnvironment(server.Env)
 		if err != nil {
 			return nil, err
 		}
@@ -751,7 +749,7 @@ func resolveOptionalPath(configPath, optionalPath string) string {
 	return resolveStatePath(configPath, optionalPath)
 }
 
-func mcpEnvironment(requested []string) ([]string, error) {
+func processEnvironment(requested []string) ([]string, error) {
 	const (
 		pathVariable = "PATH"
 		homeVariable = "HOME"
@@ -783,6 +781,53 @@ func mcpEnvironment(requested []string) ([]string, error) {
 		environment = append(environment, name+"="+value)
 	}
 	return environment, nil
+}
+
+func composeObservers(
+	configPath string,
+	configured map[string]settings.Observer,
+) ([]observerSpec, error) {
+	names := make([]string, 0, len(configured))
+	for name := range configured {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	specs := make([]observerSpec, 0, len(names))
+	for _, name := range names {
+		observer := configured[name]
+		environment, err := processEnvironment(observer.Env)
+		if err != nil {
+			return nil, fmt.Errorf("observer %q environment: %w", name, err)
+		}
+		command := observer.Command
+		if !filepath.IsAbs(command) && strings.ContainsAny(command, `/\`) {
+			command = resolveStatePath(configPath, command)
+		}
+		command, err = exec.LookPath(command)
+		if err != nil {
+			return nil, fmt.Errorf("observer %q command: %w", name, err)
+		}
+		directory := resolveOptionalPath(configPath, observer.CWD)
+		if directory != "" {
+			info, statErr := os.Stat(directory)
+			if statErr != nil {
+				return nil, fmt.Errorf("observer %q cwd: %w", name, statErr)
+			}
+			if !info.IsDir() {
+				return nil, fmt.Errorf("observer %q cwd is not a directory", name)
+			}
+		}
+		specs = append(specs, observerSpec{
+			Name:        name,
+			Command:     command,
+			Args:        append([]string(nil), observer.Args...),
+			Dir:         directory,
+			Env:         environment,
+			Permissions: append([]string(nil), observer.Permissions...),
+		})
+	}
+	return specs, nil
 }
 
 func contains(values []string, target string) bool {

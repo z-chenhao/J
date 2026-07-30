@@ -1,7 +1,7 @@
 # J-Space Workbench
 
 J-Space Workbench is J's independent top-level interpretability module and
-Observer package. It aligns
+J-tui Observer implementation. It aligns
 J-agent lifecycle events with a Jacobian-lens replay of the exact model-turn
 token sequence, then renders the result as an interactive layer × token view.
 
@@ -108,23 +108,31 @@ enough to construct the replay input. The public artifact stores event kinds,
 timings, usage, token labels, and J-lens readouts. Pass
 `--retain-transcript` only for an explicitly private experiment.
 
-## J Package Observer
+## J-tui Observer
 
-Install the released binaries and register the package:
+Install the released binaries:
 
 ```bash
 curl --proto '=https' --tlsv1.2 --fail --location \
   https://raw.githubusercontent.com/z-chenhao/J/main/J-space/install.sh | sh
 ```
 
-For repository development, `go install ./cmd/jspace-observer` followed by
-`j package add .` provides the same explicit local composition.
+The 0.2 installer unregisters the retired `dev.usej.jspace` J Package entry if
+it exists, while retaining the package cache. Observation is now configured
+directly by the J-tui product that owns the protocol.
+
+For repository development, `go install ./cmd/jspace-observer` provides the
+same executable.
 
 ```json
 {
   "extensions": {
     "observers": {
-      "include": ["dev.usej.jspace/capture"]
+      "jspace": {
+        "command": "jspace-observer",
+        "env": ["JSPACE_CAPTURE_URL", "JSPACE_CAPTURE_TOKEN"],
+        "permissions": ["agent.events", "model.frames"]
+      }
     }
   }
 }
@@ -137,9 +145,9 @@ export JSPACE_CAPTURE_URL="https://usej-model.tailb0426d.ts.net/jspace/api/captu
 export JSPACE_CAPTURE_TOKEN="..."
 ```
 
-Installing the package does not activate it. The explicit J-tui selection
-grants the manifest's `agent.events` and `model.frames` permissions. J-tui
-invokes the Observer with one bounded `j.observer.run.v0.1` value after a run.
+Installing the binary does not activate it. The explicit J-tui entry grants
+only its listed `agent.events` and `model.frames` projections. J-tui invokes
+the Observer with one bounded `j.observer.run.v0.1` value after a run.
 The Observer then submits a J-Space-owned `jspace.capture.v0.1` request to:
 
 ```text

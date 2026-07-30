@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/z-chenhao/J/J-agent/agent"
-	jpackages "github.com/z-chenhao/J/J-packages"
 	"github.com/z-chenhao/J/J-tui/internal/observe"
 )
 
@@ -29,6 +28,15 @@ const (
 )
 
 var observerRunSequence atomic.Uint64
+
+type observerSpec struct {
+	Name        string
+	Command     string
+	Args        []string
+	Dir         string
+	Env         []string
+	Permissions []string
+}
 
 type observerFrame struct {
 	Request  agent.ModelRequest  `json:"request"`
@@ -114,12 +122,12 @@ func (model *observerModel) Complete(
 type observerRunner struct {
 	runner      conversationRunner
 	model       *observerModel
-	specs       []jpackages.ObserverSpec
+	specs       []observerSpec
 	label       string
 	profile     string
 	modelID     string
 	diagnostics io.Writer
-	dispatch    func(context.Context, jpackages.ObserverSpec, observerRun) error
+	dispatch    func(context.Context, observerSpec, observerRun) error
 }
 
 func (runner *observerRunner) Run(
@@ -252,7 +260,7 @@ func projectObserverEvent(
 
 func dispatchObserver(
 	ctx context.Context,
-	spec jpackages.ObserverSpec,
+	spec observerSpec,
 	current observerRun,
 ) error {
 	content, err := json.Marshal(current)
@@ -329,7 +337,7 @@ func buildRevision() string {
 	return "unknown"
 }
 
-func hasObserverPermission(specs []jpackages.ObserverSpec, permission string) bool {
+func hasObserverPermission(specs []observerSpec, permission string) bool {
 	for _, spec := range specs {
 		for _, current := range spec.Permissions {
 			if current == permission {

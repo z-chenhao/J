@@ -21,9 +21,9 @@ Everything else belongs in a provider, Tool, or product built on J-agent.
 ## Relationship to J
 
 J-agent is the standalone runtime kernel inside the `J` repository. Its sibling
-projects J-tui and J-mem demonstrate optional composition; they are not
-dependencies or privileged features of J-agent. They use the same public seams
-available to every other consumer.
+projects demonstrate optional composition; they are not dependencies or
+privileged features of J-agent. They use the same public seams available to
+every other consumer.
 
 ## Non-goals
 
@@ -208,7 +208,10 @@ against two explicit Chat Completions protocols and several servers, but that
 does not substitute for an independent `Model` implementation or external
 production consumers.
 See [Architecture](docs/architecture.md) and
-[model protocol research](docs/model-protocol.md).
+[model protocol research](docs/model-protocol.md). The repository-level
+[embedding guide](../docs/embedding.md) shows Tool, Model wrapper, event, and
+history composition, backed by a standalone module that is tested with
+`GOWORK=off` and no `replace` directive.
 
 ## JSONL reference transport
 

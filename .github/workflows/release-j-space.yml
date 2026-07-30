@@ -52,10 +52,8 @@ jobs:
                     -o "../${output_dir}/jspace-${command}" "./cmd/jspace-${command}"
                 )
               done
-              cp J-space/j-package.json "$output_dir/j-package.json"
               tar -C "$output_dir" -czf "${output_dir}.tar.gz" \
-                jspace-observer jspace-server jspace-record jspace-gateway \
-                j-package.json
+                jspace-observer jspace-server jspace-record jspace-gateway
               rm -r "$output_dir"
             done
           done

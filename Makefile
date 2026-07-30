@@ -1,4 +1,4 @@
-.PHONY: build check test package-example-check image clean
+.PHONY: build check test package-example-check embedding-example-check image clean
 
 build:
 	$(MAKE) -C J-agent build
@@ -20,6 +20,7 @@ check:
 	$(MAKE) -C J-subagents check
 	$(MAKE) -C J-tui check
 	$(MAKE) package-example-check
+	$(MAKE) embedding-example-check
 
 test:
 	$(MAKE) -C J-agent test
@@ -31,9 +32,15 @@ test:
 	$(MAKE) -C J-subagents test
 	$(MAKE) -C J-tui test
 	$(MAKE) package-example-check
+	$(MAKE) embedding-example-check
 
 package-example-check:
 	cd examples/packages/j-hermes-memory && python3 -W error::ResourceWarning -m unittest -v test_server.py
+
+embedding-example-check:
+	cd examples/embedding/custom-host && GOWORK=off go test ./...
+	cd examples/embedding/custom-host && GOWORK=off go vet ./...
+	cd examples/embedding/custom-host && GOWORK=off go build -o /tmp/j-custom-host-example .
 
 image:
 	docker build --tag j:dev .

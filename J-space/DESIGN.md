@@ -2,7 +2,7 @@
 
 ## Decision summary
 
-Build J-space as an experimental top-level sibling Observer package and
+Build J-space as an experimental top-level sibling Observer implementation and
 research workbench, not as a J-agent runtime feature. Compose the existing
 public `Model`, `Tool`, and `EventHandler` seams through J-tui's permissioned
 completed-run Observer host, replay exact model turns through an instrumented
@@ -87,7 +87,7 @@ Speculative complexity removed:
 ```text
 J-agent run
   -> J-tui's generic Observer wrapper captures authorized frames and events
-  -> selected J-space process receives one bounded completed-run projection
+  -> explicitly configured J-space process receives one bounded completed-run projection
   -> J-space owns HTTPS delivery, durable retry, and capture credentials
   -> local MLX probe replays each completed frame
   -> matching J_l transports residuals into the final-layer basis
@@ -118,7 +118,7 @@ checkpoint or lens to that computer.
 Invariant mechanism:
 
 - J-tui generically projects authorized root model frames and lifecycle events
-  to explicitly selected package Observers.
+  to explicitly configured Observer processes.
 - an authenticated, bounded experimental request durably hands one completed
   run to the home J-Space inbox;
 - one local worker replays the frames and writes the existing artifact schema;

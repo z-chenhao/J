@@ -95,15 +95,16 @@ project-operated model host. Do not send secrets or private data. Replace its
 `baseURL` with your own OpenAI-compatible endpoint whenever you need a private
 or reliable deployment.
 
-### Package Observers and J-Space
+### Product Observers and J-Space
 
-J-tui has no J-Space-specific integration. It can explicitly invoke selected
-read-only Observer contributions installed through J Packages. The top-level
-J-Space module provides the first Observer; it submits one completed root Agent
-run to the replay service that owns the local Qwen checkpoint and fitted lens.
+J-tui has no J-Space-specific integration. Its typed product configuration can
+explicitly invoke read-only completed-run Observer processes. The top-level
+J-Space module implements the first Observer; it submits one completed root
+Agent run to the replay service that owns the local Qwen checkpoint and fitted
+lens.
 
-Install the `jspace-observer` binary and register the J-Space package, then
-select its exact contribution in `~/.j/config.json`:
+Install the `jspace-observer` binary, then configure it explicitly in
+`~/.j/config.json`:
 
 ```bash
 curl --proto '=https' --tlsv1.2 --fail --location \
@@ -114,15 +115,19 @@ curl --proto '=https' --tlsv1.2 --fail --location \
 {
   "extensions": {
     "observers": {
-      "include": ["dev.usej.jspace/capture"]
+      "jspace": {
+        "command": "jspace-observer",
+        "env": ["JSPACE_CAPTURE_URL", "JSPACE_CAPTURE_TOKEN"],
+        "permissions": ["agent.events", "model.frames"]
+      }
     }
   }
 }
 ```
 
-The package manifest explicitly requests `agent.events` and `model.frames`.
-Installing the package alone sends nothing; the exact `include` entry is the
-separate permission grant.
+Installing the binary alone sends nothing. Presence of the typed `jspace`
+entry starts no background process, but grants the named process the listed
+projection after each completed run.
 
 J-Space owns its endpoint, credential, durable outbox, and retry policy. Export
 its environment before starting J-tui:
@@ -223,22 +228,20 @@ before J-tui starts. Use `--no-packages` for one package-free run or
 `--packages-registry <path>` / `J_TUI_PACKAGES_REGISTRY` to inspect another
 registry. Existing MCP and Skills package configuration needs no migration.
 
-The exception is the retired, product-specific top-level `jspace` section from
-J-tui 0.2. Remove that section and the old `--jspace-*` /
-`J_TUI_JSPACE_*` settings, install the J-Space package, select
-`dev.usej.jspace/capture` under `extensions.observers`, and export
-`JSPACE_CAPTURE_URL` plus `JSPACE_CAPTURE_TOKEN`. This is an intentional
-migration: J-tui no longer owns J-Space transport or credentials.
-
-J Package 0.1 remains supported for package-owned stdio MCP servers and Agent
-Skills roots. Package 0.2 additionally supports explicitly selected read-only
-Observers. Installation is an executable-code trust decision but does not
-activate Observers; selection is a separate permission grant. J-tui freezes
-package Tools at construction time and fails on duplicate Tool or Skill names.
-See the
+J Package 0.1 supports package-owned stdio MCP servers and Agent Skills roots.
+It does not define product Observer, UI, session, model, or provider
+contributions. Installation is an executable-code trust decision. J-tui
+freezes package Tools at construction time and fails on duplicate Tool or Skill
+names. See the
 [package protocol and author guide](../docs/packages.md).
 Observer authors should also read the
 [completed-run Observer protocol](docs/observers.md).
+
+When upgrading from J-tui 0.3, replace the former
+`"include": ["dev.usej.jspace/capture"]` selection with the typed `jspace`
+process entry shown above. The J-Space 0.2 installer unregisters the retired
+`dev.usej.jspace` package entry while retaining its cached files. Without that
+installer, run `j package remove dev.usej.jspace` explicitly.
 
 J-tui can also compose optional J-mcp, J-mem, J-skills, and J-subagents
 capabilities from the same typed configuration. Presence enables a capability;

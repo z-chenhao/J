@@ -459,7 +459,7 @@ func TestDefaultPath(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsExplicitPackageObservers(t *testing.T) {
+func TestLoadAcceptsExplicitProductObservers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	writeTestFile(t, path, `{
 		"defaultProfile":"local",
@@ -472,7 +472,11 @@ func TestLoadAcceptsExplicitPackageObservers(t *testing.T) {
 		},
 		"extensions":{
 			"observers":{
-				"include":["dev.usej.jspace/capture"]
+				"jspace":{
+					"command":"jspace-observer",
+					"env":["JSPACE_CAPTURE_URL","JSPACE_CAPTURE_TOKEN"],
+					"permissions":["agent.events","model.frames"]
+				}
 			}
 		}
 	}`)
@@ -481,22 +485,25 @@ func TestLoadAcceptsExplicitPackageObservers(t *testing.T) {
 		t.Fatal(err)
 	}
 	if file.Extensions == nil ||
-		file.Extensions.Observers == nil ||
-		len(file.Extensions.Observers.Include) != 1 ||
-		file.Extensions.Observers.Include[0] != "dev.usej.jspace/capture" {
+		len(file.Extensions.Observers) != 1 ||
+		file.Extensions.Observers["jspace"].Command != "jspace-observer" {
 		t.Fatalf("extensions=%#v", file.Extensions)
 	}
 }
 
-func TestLoadRejectsInvalidObserverSelection(t *testing.T) {
-	for _, selection := range []string{
-		"capture",
-		"dev.usej.jspace/",
-		"/capture",
-		"dev.usej.jspace/capture/extra",
-		"Dev.usej.jspace/capture",
+func TestLoadRejectsInvalidObserverConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		observer string
+		want     string
+	}{
+		{"name", `"JSpace":{"command":"observer","permissions":["agent.events"]}`, "lowercase"},
+		{"command", `"jspace":{"command":"","permissions":["agent.events"]}`, "command"},
+		{"permissions", `"jspace":{"command":"observer","permissions":[]}`, "permissions"},
+		{"unknown permission", `"jspace":{"command":"observer","permissions":["agent.mutate"]}`, "unsupported"},
+		{"environment", `"jspace":{"command":"observer","env":["BAD=NAME"],"permissions":["agent.events"]}`, "environment"},
 	} {
-		t.Run(selection, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "config.json")
 			writeTestFile(t, path, strings.ReplaceAll(`{
 				"defaultProfile":"local",
@@ -509,12 +516,12 @@ func TestLoadRejectsInvalidObserverSelection(t *testing.T) {
 				},
 				"extensions":{
 					"observers":{
-						"include":["SELECTION"]
+						OBSERVER
 					}
 				}
-			}`, "SELECTION", selection))
+			}`, "OBSERVER", test.observer))
 			if _, err := Load(path); err == nil ||
-				!strings.Contains(err.Error(), "package/observer") {
+				!strings.Contains(err.Error(), test.want) {
 				t.Fatalf("error=%v", err)
 			}
 		})

@@ -168,44 +168,23 @@ func TestComposeRuntimeCanDisableInstalledPackages(t *testing.T) {
 	}
 }
 
-func TestComposeRuntimeSelectsOnlyConfiguredPackageObserver(t *testing.T) {
-	root := t.TempDir()
-	observerPath := filepath.Join(root, "observer")
+func TestComposeRuntimeResolvesConfiguredProductObserver(t *testing.T) {
+	configDirectory := t.TempDir()
+	configPath := filepath.Join(configDirectory, "config.json")
+	observerPath := filepath.Join(configDirectory, "observer")
 	if err := os.WriteFile(observerPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	manifest := `{
-		"schemaVersion":"j.package.v0.2",
-		"id":"dev.usej.observer-test",
-		"version":"1.0.0",
-		"contributes":{"observers":[{
-			"id":"trace",
-			"command":"./observer",
-			"env":["OBSERVER_SECRET"],
-			"permissions":["agent.events","model.frames"]
-		}]}
-	}`
-	if err := os.WriteFile(
-		filepath.Join(root, jpackages.ManifestFilename),
-		[]byte(manifest),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-	registryPath := filepath.Join(t.TempDir(), "packages.json")
-	manager, err := jpackages.NewManager(registryPath, filepath.Join(t.TempDir(), "cache"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := manager.Add(context.Background(), root); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("OBSERVER_SECRET", "allowed")
 	composition, err := composeRuntime(context.Background(), config{
-		configPath:       filepath.Join(t.TempDir(), ".j", "config.json"),
-		packagesRegistry: registryPath,
-		extensions: &settings.Extensions{Observers: &settings.Observers{
-			Include: []string{"dev.usej.observer-test/trace"},
+		configPath: configPath,
+		noPackages: true,
+		extensions: &settings.Extensions{Observers: map[string]settings.Observer{
+			"trace": {
+				Command:     "./observer",
+				Env:         []string{"OBSERVER_SECRET"},
+				Permissions: []string{"agent.events", "model.frames"},
+			},
 		}},
 	})
 	if err != nil {
@@ -213,7 +192,8 @@ func TestComposeRuntimeSelectsOnlyConfiguredPackageObserver(t *testing.T) {
 	}
 	defer composition.Close()
 	if len(composition.observers) != 1 ||
-		composition.observers[0].Name != "dev.usej.observer-test/trace" ||
+		composition.observers[0].Name != "trace" ||
+		composition.observers[0].Command != observerPath ||
 		!strings.Contains(strings.Join(composition.observers[0].Env, "\n"), "OBSERVER_SECRET=allowed") {
 		t.Fatalf("observers=%+v", composition.observers)
 	}
@@ -1038,7 +1018,7 @@ func TestMCPEnvironmentRequiresForwardedValues(t *testing.T) {
 	if err := os.Unsetenv("MISSING_MCP_VALUE"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mcpEnvironment([]string{"MISSING_MCP_VALUE"}); err == nil {
+	if _, err := processEnvironment([]string{"MISSING_MCP_VALUE"}); err == nil {
 		t.Fatal("missing forwarded environment variable was accepted")
 	}
 }

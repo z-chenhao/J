@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/z-chenhao/J/J-agent/agent"
-	jpackages "github.com/z-chenhao/J/J-packages"
 	"github.com/z-chenhao/J/J-tui/internal/observe"
 )
 
@@ -84,14 +83,14 @@ func TestObserverRunnerProjectsPermissionsAndIsolatesFailure(t *testing.T) {
 		model:   captured,
 		label:   "test",
 		modelID: "qwen",
-		specs: []jpackages.ObserverSpec{
+		specs: []observerSpec{
 			{Name: "events", Permissions: []string{permissionEvents}},
 			{Name: "frames", Permissions: []string{permissionFrames}},
 		},
 		diagnostics: &diagnostics,
 		dispatch: func(
 			_ context.Context,
-			spec jpackages.ObserverSpec,
+			spec observerSpec,
 			run observerRun,
 		) error {
 			receivedMu.Lock()
@@ -128,7 +127,7 @@ func TestDispatchObserverWritesOneBoundedRun(t *testing.T) {
 	if testing.Short() {
 		t.Skip("starts a child process")
 	}
-	spec := jpackages.ObserverSpec{
+	spec := observerSpec{
 		Name:    "fixture",
 		Command: "/bin/sh",
 		Args:    []string{"-c", "read line; test \"${line#*j.observer.run.v0.1}\" != \"$line\""},

@@ -4,19 +4,18 @@ Status: experimental.
 
 ## Purpose
 
-A prebuilt J-tui needs one narrow way to give an explicitly selected package
+A prebuilt J-tui needs one narrow way to give an explicitly configured process
 read-only evidence about a completed root Agent run. J-space is the first real
 consumer. This protocol is owned by the product host; it is not a J-agent
-Plugin, Hook, or transport.
+Plugin, Hook, package contribution, or transport.
 
 Observers cannot modify messages, Tools, model responses, lifecycle events,
 history, UI, or the Agent result.
 
 ## Selection and permissions
 
-An Observer must be declared by a `j.package.v0.2` manifest and selected by its
-exact `<package-id>/<observer-id>` name in J-tui configuration. Installing the
-package is executable-code trust but does not activate it.
+An Observer is enabled only by a named entry in
+`extensions.observers`. Installing an executable does not activate it.
 
 The manifest requests a non-empty subset of:
 
@@ -26,7 +25,30 @@ The manifest requests a non-empty subset of:
   prompts, reasoning blocks, Tool schemas, Tool results, and model output.
 
 `model.frames` is sensitive. J-tui omits every ungranted projection even though
-the package executable is already trusted to run as the user.
+the configured executable is already trusted to run as the user.
+
+Each Observer entry is a typed process recipe:
+
+```json
+{
+  "extensions": {
+    "observers": {
+      "trace": {
+        "command": "trace-observer",
+        "args": ["--one-run"],
+        "env": ["TRACE_TOKEN"],
+        "cwd": ".",
+        "permissions": ["agent.events"]
+      }
+    }
+  }
+}
+```
+
+Relative commands and `cwd` values resolve from the directory containing the
+configuration file. No shell expansion occurs. `PATH`, `HOME`, and available
+temporary-directory and locale values form the process baseline; every
+additional environment value must be named explicitly.
 
 ## Process contract
 
@@ -58,8 +80,8 @@ reject incompatible process contracts without changing J-agent.
 
 ## Failure semantics
 
-- Invalid package identity, command, environment, or selection fails product
-  construction before the Agent is created.
+- Invalid name, command, environment, permission, or working directory fails
+  product construction before the Agent is created.
 - Once an Agent run starts, Observer timeout, crash, rejection, or transport
   failure is diagnostic only.
 - The authoritative `agent.RunResult` and run error are returned unchanged.
@@ -71,6 +93,6 @@ reject incompatible process contracts without changing J-agent.
 
 Version 0.1 has no streaming process, response channel, mutation result,
 arbitrary event subscription, prompt interception, Tool interception, UI
-extension, shared mutable state, dynamic library, or J-agent dependency on
-packages. A second independent Observer must validate the same completed-run
-semantics before stability is considered.
+extension, shared mutable state, dynamic library, J Package contribution, or
+J-agent dependency on product configuration. A second independent Observer
+must validate the same completed-run semantics before stability is considered.

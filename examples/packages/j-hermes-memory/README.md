@@ -5,6 +5,10 @@ This is an independent J Package inspired by the useful public shape of
 J internals and does not receive lifecycle hooks, prompts, transcripts, or
 model reasoning.
 
+It is not wire-, storage-, or behavior-compatible with NousResearch Hermes
+Agent. Its purpose is to validate that a community package can contribute MCP
+Tools and a Skill without privileged J integration.
+
 The store is append-only JSONL. Forgetting writes a tombstone. Common secret
 formats are rejected before persistence. It requires Python 3.10 or newer and
 uses only the standard library; J Package does not install language runtimes or
