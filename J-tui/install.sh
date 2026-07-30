@@ -2,8 +2,9 @@
 set -eu
 
 repository="z-chenhao/J"
+version="${J_TUI_VERSION:-0.3.0}"
 install_dir="${J_TUI_INSTALL_DIR:-${HOME}/.local/bin}"
-release_url="https://github.com/${repository}/releases/latest/download"
+release_url="https://github.com/${repository}/releases/download/J-tui/v${version}"
 
 for command_name in curl tar awk install; do
 	if ! command -v "$command_name" >/dev/null 2>&1; then

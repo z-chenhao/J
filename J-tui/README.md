@@ -28,13 +28,15 @@ curl -fsSL https://raw.githubusercontent.com/z-chenhao/J/main/J-tui/install.sh |
 
 The installer:
 
-- downloads only from this repository's latest GitHub Release;
+- downloads the current J-tui component Release rather than the unrelated
+  repository-wide latest Release;
 - selects the current operating system and architecture;
 - verifies the archive against the published SHA-256 checksums;
 - installs `j-tui` and the `j package` manager to `~/.local/bin` without
   requiring root.
 
-Set `J_TUI_INSTALL_DIR` to select another directory.
+Set `J_TUI_INSTALL_DIR` to select another directory. Set `J_TUI_VERSION` only
+to install another published J-tui version.
 
 ## First run
 
