@@ -12,14 +12,14 @@ J explores one question:
 > What is the smallest truthful agent runtime that remains easy to customize?
 
 J is the umbrella repository. J-agent is its independently embeddable runtime
-kernel. J-tui, J-mcp, J-mem, J-packages, J-skills, and J-subagents are first-party
-consumers used to prove that the public seams are sufficient for real
-customization.
+kernel. J-tui, J-mcp, J-mem, J-packages, J-skills, J-subagents, and J-space are
+first-party consumers used to prove that the public seams are sufficient for
+real customization.
 
 The repository name also comes from the Jacobian and the J-space research
-direction. That identity is implemented as an independent workbench under
-`J-agent/research/jspace`; it observes J-agent through the same public seams as
-other consumers and does not make model internals a runtime responsibility.
+direction. That identity is implemented by the top-level `J-space` sibling. It
+observes J-agent through the same public seams and J-tui's permissioned Observer
+host, without making model internals a runtime responsibility.
 
 Current verified consumers of J-agent are its reference CLI, private JSONL
 runtime, J-tui, J-mcp, J-mem, J-packages, J-skills, and J-subagents. One OpenAI
@@ -110,20 +110,21 @@ real J consumers prove more are necessary.
 
 ```text
 J/
-├── J-agent/   model/tool loop, plus isolated research under research/
+├── J-agent/   minimal model/tool loop
 ├── J-tui/     terminal presentation and interaction
 ├── J-mcp/     MCP client lifecycle and Tool projection
 ├── J-mem/     local persistence and memory tools
 ├── J-packages/ explicit package installation and product-host composition
 ├── J-skills/  Agent Skills validation and progressive resource loading
 ├── J-subagents/ isolated foreground child Agents projected as a Tool
+├── J-space/   optional Jacobian-lens observer package and workbench
 └── docs/      repository-level design decisions
 ```
 
 Dependency rules:
 
 - J-agent must not import J-tui, J-mcp, J-mem, J-packages, J-skills,
-  J-subagents, or future J product modules.
+  J-subagents, J-space, or future J product modules.
 - Sibling product modules may depend on J-agent's experimental public Go API.
 - Sibling modules must not own each other's policy.
 - Product entrypoints compose modules; the runtime does not discover them.
@@ -501,12 +502,17 @@ J-agent already has the required mechanisms: construction-time Tools and
 external Agent Skills projected through a Tool. J-mcp initializes MCP sessions
 and projects their tools to `agent.Tool` before an Agent is constructed.
 
-J-packages now owns the narrow shared installation and construction mechanism
-validated by J-tui and a second custom J-agent host. Its 0.1 manifest exposes
-only package-owned stdio MCP servers and Agent Skills roots. The CLI records
-explicit local paths or pinned Git sources in a user-owned private registry.
-It performs no project discovery, hidden prompt injection, or runtime mutation.
-The complete experimental contract is [J Package Protocol 0.1](packages.md).
+J-packages owns the narrow shared installation and construction mechanism
+validated by J-tui and a second custom J-agent host. Version 0.1 remains
+supported for package-owned stdio MCP servers and Agent Skills roots. Version
+0.2 adds one experimental, read-only Observer contribution because J-space
+proved that a prebuilt product needs permissioned access to safe Agent events
+and complete Model frames without a product-specific branch. Observers are
+never activated merely by installation; J-tui selects exact package/observer
+names. The CLI records explicit local paths or pinned Git sources in a
+user-owned private registry. It performs no project discovery, hidden prompt
+injection, or runtime mutation. The complete contract is
+[J Package Protocol 0.2](packages.md).
 
 The experimental [J MCP Extension Composition Protocol](extensions.md) defines
 the direct host configuration lifecycle, cancellation path, and deliberately
@@ -522,6 +528,14 @@ share MCP's connection lifecycle. These differences are evidence against
 extracting a common lifecycle prematurely. `Extension`, `Plugin`, `Skill`,
 `SubAgent`, and `MCP` remain absent from J-agent.
 
+J-space is the first Observer package. J-tui owns the experimental
+`j.observer.run.v0.1` completed-run process protocol, captures frames by wrapping
+the public `Model` seam, projects safe lifecycle metadata from its existing
+event stream, and invokes selected Observer processes with bounded input and
+time. Observer failure is diagnostic and cannot change the authoritative Agent
+result. J-space owns capture credentials, HTTPS delivery, durable retry, replay,
+and visualization policy.
+
 ## 9. Planned external modules
 
 These names describe product modules, not promised J-agent interfaces:
@@ -532,6 +546,7 @@ These names describe product modules, not promised J-agent interfaces:
 | J-skills | Implemented standard skill discovery and progressive resource Tool |
 | J-subagents | Implemented foreground isolated child Agents with optional transcript restoration |
 | J-packages | Implemented explicit local/Git installation and MCP/Skills composition |
+| J-space | Implemented independent read-only Observer and Jacobian-lens workbench |
 | J-gateway | Map platform chat identity to external Agent/session ownership |
 
 `J-plugins` is deliberately not allocated. The implemented package protocol
@@ -577,8 +592,8 @@ Potential future mechanisms must be validated in this order:
 - J-tui owns its experimental profile file and release artifacts; J-agent does
   not read product configuration or install packages. J-packages is a sibling
   product-host module and its `j` CLI owns explicit installation.
-- J-Space is part of J's research identity and has an independent local
-  workbench under `J-agent/research/`; it is not a runtime dependency or a
+- J-Space is part of J's research identity and is an independent top-level
+  Observer package and workbench; it is not a runtime dependency or a
   model-internals promise in J-agent's public API.
 - Reasoning content is preserved when provider continuation requires it.
 - The JSONL process is a reference transport, not universal framework
@@ -590,11 +605,11 @@ Potential future mechanisms must be validated in this order:
 - Public APIs remain experimental before independent production consumers.
 - Extension hosting remains product-owned construction-time composition;
   J-agent does not discover or load extensions.
-- J-mcp, J-mem, J-packages, J-skills, and J-subagents are independent Go
+- J-mcp, J-mem, J-packages, J-skills, J-subagents, and J-space are independent Go
   modules; none depends on J-tui.
-- J Package 0.1 exposes only stdio MCP and Agent Skills contributions; broader
-  plugin Hooks, UI, model, transcript, and runtime mutation surfaces remain
-  deliberately absent.
+- J Package 0.1 remains supported for stdio MCP and Agent Skills. J Package 0.2
+  adds only explicitly selected read-only Observers; broader plugin Hooks, UI,
+  model mutation, transcript mutation, and runtime mutation remain absent.
 - J-skills implements the external Agent Skills format without moving Skill
   semantics into J-agent.
 - J-subagents is the direct subagent module; J-delegate does not exist.

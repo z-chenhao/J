@@ -13,6 +13,7 @@ J is a repository of small, composable agent projects.
 - `J-packages` installs explicit MCP and Agent Skills packages for product hosts.
 - `J-skills` loads standard Agent Skills progressively.
 - `J-subagents` runs isolated foreground child Agents through a tool.
+- `J-space` is an optional Jacobian-lens observer package and research workbench.
 
 J-agent must not depend on sibling product modules. The siblings validate the
 same public seams available to external consumers. They are examples, not
@@ -26,10 +27,11 @@ Core invariants are explicit. Experimental contracts become stable only after
 real consumers validate them. Extra capabilities stay outside J-agent unless a
 concrete integration proves that a smaller composition is insufficient.
 
-J-Space and Jacobian-lens work belongs under `J-agent/research/` and is not a runtime
-dependency. It may inform model harness defaults only after reproducible
-J-lens observations and behavioral benchmarks validate the same concrete
-improvement.
+J-Space and Jacobian-lens work belongs in the top-level `J-space` sibling
+module. It composes J-agent's public seams through a permissioned product-host
+Observer and is not a runtime dependency. It may inform model harness defaults
+only after reproducible J-lens observations and behavioral benchmarks validate
+the same concrete improvement.
 
 This document defines the fundamental philosophy behind every project.
 Technology changes.

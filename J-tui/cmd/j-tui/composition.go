@@ -44,6 +44,7 @@ type runtimeComposition struct {
 	connections []*jmcp.Connection
 	packages    *jpackages.Session
 	mcpTools    []mcpToolObservation
+	observers   []jpackages.ObserverSpec
 	subagents   *subagentEventRelay
 }
 
@@ -166,6 +167,9 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 	}
 
 	var packageSkillRoots []string
+	if cfg.noPackages && cfg.extensions != nil && cfg.extensions.Observers != nil {
+		return nil, errors.New("configured observers require installed J Packages")
+	}
 	if !cfg.noPackages {
 		packageSession, err := jpackages.Open(ctx, jpackages.HostConfig{
 			RegistryPath: cfg.packagesRegistry,
@@ -175,6 +179,14 @@ func composeRuntime(ctx context.Context, cfg config) (*runtimeComposition, error
 		}
 		composition.packages = packageSession
 		packageSkillRoots = packageSession.SkillRoots()
+		if cfg.extensions != nil && cfg.extensions.Observers != nil {
+			composition.observers, err = packageSession.ObserverSpecs(
+				cfg.extensions.Observers.Include,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("select J Package observers: %w", err)
+			}
+		}
 		for _, information := range packageSession.ToolInfo() {
 			composition.mcpTools = append(composition.mcpTools, mcpToolObservation{
 				Server:   information.Package + "/" + information.Server,

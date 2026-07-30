@@ -36,12 +36,30 @@ type ToolInfo struct {
 	Selected bool
 }
 
+// ObserverSpec is one explicitly selected read-only observer process with all
+// package-relative paths and environment values resolved by J-packages.
+type ObserverSpec struct {
+	Name        string
+	Command     string
+	Args        []string
+	Dir         string
+	Env         []string
+	Permissions []string
+}
+
+type registeredObserver struct {
+	pkg          Package
+	contribution ObserverContribution
+}
+
 // Session is one immutable construction-time package composition.
 type Session struct {
 	tools       []agent.Tool
 	skillRoots  []string
 	toolInfo    []ToolInfo
+	observers   []registeredObserver
 	connections []*jmcp.Connection
+	lookupEnv   func(string) (string, bool)
 }
 
 // Open starts every installed package MCP contribution and freezes its Tools.
@@ -64,7 +82,7 @@ func Open(ctx context.Context, config HostConfig) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	session := &Session{}
+	session := &Session{lookupEnv: config.LookupEnv}
 	succeeded := false
 	defer func() {
 		if !succeeded {
@@ -78,6 +96,19 @@ func Open(ctx context.Context, config HostConfig) (*Session, error) {
 				return nil, fmt.Errorf("package %q skill root: %w", pkg.Manifest.ID, err)
 			}
 			session.skillRoots = append(session.skillRoots, root)
+		}
+		observers := append(
+			[]ObserverContribution(nil),
+			pkg.Manifest.Contributes.Observers...,
+		)
+		sort.Slice(observers, func(left, right int) bool {
+			return observers[left].ID < observers[right].ID
+		})
+		for _, contribution := range observers {
+			session.observers = append(session.observers, registeredObserver{
+				pkg:          pkg,
+				contribution: contribution,
+			})
 		}
 		contributions := append([]MCPContribution(nil), pkg.Manifest.Contributes.MCP...)
 		sort.Slice(contributions, func(left, right int) bool {
@@ -108,6 +139,59 @@ func Open(ctx context.Context, config HostConfig) (*Session, error) {
 	}
 	succeeded = true
 	return session, nil
+}
+
+// ObserverSpecs resolves an exact set of package/id observers. Merely
+// installing a package never selects an observer or grants it model data.
+func (session *Session) ObserverSpecs(include []string) ([]ObserverSpec, error) {
+	if session == nil {
+		return nil, errors.New("package session is required")
+	}
+	available := make(map[string]registeredObserver, len(session.observers))
+	for _, observer := range session.observers {
+		name := observer.pkg.Manifest.ID + "/" + observer.contribution.ID
+		available[name] = observer
+	}
+	seen := make(map[string]struct{}, len(include))
+	specs := make([]ObserverSpec, 0, len(include))
+	for _, name := range include {
+		if _, duplicate := seen[name]; duplicate {
+			return nil, fmt.Errorf("observer %q is selected more than once", name)
+		}
+		seen[name] = struct{}{}
+		observer, exists := available[name]
+		if !exists {
+			names := make([]string, 0, len(available))
+			for availableName := range available {
+				names = append(names, availableName)
+			}
+			sort.Strings(names)
+			return nil, fmt.Errorf(
+				"observer %q is not installed; available observers: %q",
+				name,
+				names,
+			)
+		}
+		command, directory, environment, err := resolveProcess(
+			session.lookupEnv,
+			observer.pkg,
+			observer.contribution.Command,
+			observer.contribution.CWD,
+			observer.contribution.Env,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("observer %q: %w", name, err)
+		}
+		specs = append(specs, ObserverSpec{
+			Name:        name,
+			Command:     command,
+			Args:        append([]string(nil), observer.contribution.Args...),
+			Dir:         directory,
+			Env:         append([]string(nil), environment...),
+			Permissions: append([]string(nil), observer.contribution.Permissions...),
+		})
+	}
+	return specs, nil
 }
 
 // Tools returns a defensive copy of the package Tools.
@@ -179,51 +263,20 @@ func openContribution(
 	pkg Package,
 	contribution MCPContribution,
 ) (*jmcp.Connection, error) {
-	command := contribution.Command
-	if hasPathSeparator(command) {
-		var err error
-		command, err = resolvedPathWithin(pkg.Root, command)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"package %q MCP %q command: %w",
-				pkg.Manifest.ID,
-				contribution.ID,
-				err,
-			)
-		}
-	}
-	directory := pkg.Root
-	if contribution.CWD != "" {
-		var err error
-		directory, err = resolvedPathWithin(pkg.Root, contribution.CWD)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"package %q MCP %q cwd: %w",
-				pkg.Manifest.ID,
-				contribution.ID,
-				err,
-			)
-		}
-	}
-	environment, err := processEnvironment(contribution.Env, lookup)
+	command, directory, environment, err := resolveProcess(
+		lookup,
+		pkg,
+		contribution.Command,
+		contribution.CWD,
+		contribution.Env,
+	)
 	if err != nil {
 		return nil, fmt.Errorf(
-			"package %q MCP %q environment: %w",
+			"package %q MCP %q: %w",
 			pkg.Manifest.ID,
 			contribution.ID,
 			err,
 		)
-	}
-	if !hasPathSeparator(command) {
-		command, err = lookPath(command, environment)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"package %q MCP %q command: %w",
-				pkg.Manifest.ID,
-				contribution.ID,
-				err,
-			)
-		}
 	}
 	stderr := newStartupStderr()
 	connection, err := jmcp.DialStdio(ctx, jmcp.StdioConfig{
@@ -247,6 +300,42 @@ func openContribution(
 		)
 	}
 	return connection, nil
+}
+
+func resolveProcess(
+	lookup func(string) (string, bool),
+	pkg Package,
+	configuredCommand string,
+	configuredDirectory string,
+	requestedEnvironment []string,
+) (string, string, []string, error) {
+	command := configuredCommand
+	if hasPathSeparator(command) {
+		var err error
+		command, err = resolvedPathWithin(pkg.Root, command)
+		if err != nil {
+			return "", "", nil, fmt.Errorf("command: %w", err)
+		}
+	}
+	directory := pkg.Root
+	if configuredDirectory != "" {
+		var err error
+		directory, err = resolvedPathWithin(pkg.Root, configuredDirectory)
+		if err != nil {
+			return "", "", nil, fmt.Errorf("cwd: %w", err)
+		}
+	}
+	environment, err := processEnvironment(requestedEnvironment, lookup)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("environment: %w", err)
+	}
+	if !hasPathSeparator(command) {
+		command, err = lookPath(command, environment)
+		if err != nil {
+			return "", "", nil, fmt.Errorf("command: %w", err)
+		}
+	}
+	return command, directory, environment, nil
 }
 
 func lookPath(command string, environment []string) (string, error) {

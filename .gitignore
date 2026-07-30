@@ -1,11 +1,14 @@
 /J-agent/bin/
+/J-packages/bin/
+/J-space/bin/
 /J-tui/bin/
 .DS_Store
 .vscode/
 .idea/
 *.log
 .env
+__pycache__/
 *.pt
 *.safetensors
-J-agent/research/jspace/artifacts/
-J-agent/research/jspace/results/
+J-space/artifacts/
+J-space/results/

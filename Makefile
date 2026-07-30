@@ -2,7 +2,7 @@
 
 build:
 	$(MAKE) -C J-agent build
-	$(MAKE) -C J-agent/research/jspace build
+	$(MAKE) -C J-space build
 	$(MAKE) -C J-mcp build
 	$(MAKE) -C J-mem build
 	$(MAKE) -C J-packages build
@@ -12,7 +12,7 @@ build:
 
 check:
 	$(MAKE) -C J-agent check
-	$(MAKE) -C J-agent/research/jspace check
+	$(MAKE) -C J-space check
 	$(MAKE) -C J-mcp check
 	$(MAKE) -C J-mem check
 	$(MAKE) -C J-packages check
@@ -23,7 +23,7 @@ check:
 
 test:
 	$(MAKE) -C J-agent test
-	$(MAKE) -C J-agent/research/jspace test
+	$(MAKE) -C J-space test
 	$(MAKE) -C J-mcp test
 	$(MAKE) -C J-mem test
 	$(MAKE) -C J-packages test
@@ -40,6 +40,6 @@ image:
 
 clean:
 	$(MAKE) -C J-agent clean
-	$(MAKE) -C J-agent/research/jspace clean
+	$(MAKE) -C J-space clean
 	$(MAKE) -C J-packages clean
 	$(MAKE) -C J-tui clean

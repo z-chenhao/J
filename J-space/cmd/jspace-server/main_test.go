@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/artifact"
-	jspaceweb "github.com/z-chenhao/J/J-agent/research/jspace/web"
+	"github.com/z-chenhao/J/J-space/internal/artifact"
+	jspaceweb "github.com/z-chenhao/J/J-space/web"
 )
 
 func testServer(t *testing.T, token string) (*server, string) {

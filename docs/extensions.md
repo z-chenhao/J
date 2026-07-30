@@ -4,7 +4,7 @@ Status: experimental and implemented by J-mcp plus J-tui's direct,
 configuration-owned MCP host.
 
 Reusable package installation is a separate layer documented by
-[J Package Protocol 0.1](packages.md). J-packages reuses this same MCP Tool
+[J Package Protocol 0.2](packages.md). J-packages reuses this same MCP Tool
 projection rather than changing it.
 
 ## Decision summary

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "j.package.v0.2",
+  "id": "dev.usej.jspace",
+  "version": "0.1.0",
+  "description": "Read-only Jacobian-lens observations for local J-agent runs.",
+  "contributes": {
+    "observers": [
+      {
+        "id": "capture",
+        "command": "jspace-observer",
+        "env": [
+          "JSPACE_CAPTURE_URL",
+          "JSPACE_CAPTURE_TOKEN"
+        ],
+        "permissions": [
+          "agent.events",
+          "model.frames"
+        ]
+      }
+    ]
+  }
+}

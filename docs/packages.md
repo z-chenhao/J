@@ -1,19 +1,21 @@
-# J Package Protocol 0.1
+# J Package Protocol 0.2
 
 Status: experimental.
 
 ## Requirement and current consumers
 
 Users need one explicit, user-owned way to install reusable capabilities into
-J-tui and into other products built on J-agent. The current proven capability
-types are stdio MCP tools and standard Agent Skills. J-tui is the first product
-host; the J-packages tests also compose the same installed Tool through a
-custom J-agent host.
+J-tui and into other products built on J-agent. Version 0.1 proved stdio MCP
+tools and standard Agent Skills. Version 0.2 preserves that schema and adds one
+read-only Observer contribution after J-space proved that a prebuilt host needs
+to expose safe Agent events and complete Model frames without adding
+product-specific code.
 
 The protocol does not attempt to model every Pi extension feature. The
 independent [`j-hermes-memory`](../examples/packages/j-hermes-memory/) example
 validates a real package with three memory Tools, one Skill, local persistence,
-and no access to J internals.
+and no access to J internals. The top-level [`J-space`](../J-space/) module is
+the first Observer package.
 
 The reference case is
 [`pi-hermes-memory`](https://github.com/khromov/pi-hermes-memory). That package
@@ -34,18 +36,20 @@ explicit local path or pinned Git source
   ~/.j/packages.json (mode 0600)
                  |
                  v
-       product construction
-          /             \
-         v               v
-  stdio MCP tools   Agent Skills roots
-         \               /
-          v             v
-        existing J-agent Tool seam
+                    product construction
+                 /          |             \
+                v           v              v
+         stdio MCP    Agent Skills   selected Observer
+            tools        roots          process
+                \           /              |
+                 v         v               v
+              J-agent Tool seam    product-owned projection
 ```
 
-J-agent is not involved in discovery, installation, trust, process startup, or
-Skill loading. `J-packages` depends on J-agent and J-mcp; J-agent does not
-depend on J-packages.
+J-agent is not involved in discovery, installation, trust, Observer execution,
+or Skill loading. `J-packages` depends on J-agent and J-mcp; J-agent does not
+depend on J-packages. J-tui owns its Observer process protocol and permission
+projection.
 
 ## Manifest
 
@@ -53,8 +57,8 @@ Every package has `j-package.json` at its root:
 
 ```json
 {
-  "schemaVersion": "j.package.v0.1",
-  "id": "dev.example.memory",
+  "schemaVersion": "j.package.v0.2",
+  "id": "dev.example.agent-tools",
   "version": "1.0.0",
   "description": "Local memory tools and guidance.",
   "contributes": {
@@ -68,7 +72,15 @@ Every package has `j-package.json` at its root:
         "tools": ["memory_store", "memory_search"]
       }
     ],
-    "skills": ["skills"]
+    "skills": ["skills"],
+    "observers": [
+      {
+        "id": "trace",
+        "command": "trace-observer",
+        "env": ["TRACE_PATH"],
+        "permissions": ["agent.events"]
+      }
+    ]
   }
 }
 ```
@@ -76,10 +88,11 @@ Every package has `j-package.json` at its root:
 Rules:
 
 - JSON is strict: unknown fields and multiple JSON values are rejected.
-- `schemaVersion` is exactly `j.package.v0.1`.
+- `j.package.v0.1` remains accepted unchanged. Observer contributions require
+  `schemaVersion: "j.package.v0.2"`.
 - `id` is a lowercase dot/dash identifier; `version` is semantic version
   `x.y.z` with an optional pre-release or build suffix.
-- At least one MCP or Skills contribution is required.
+- At least one MCP, Skills, or Observer contribution is required.
 - MCP is stdio only. `command` is a bare executable resolved from the forwarded
   `PATH` or a package-relative executable. Arguments are passed directly;
   neither shell expansion nor command substitution occurs.
@@ -93,6 +106,14 @@ Rules:
 - Skills roots contain ordinary Agent Skills directories and `SKILL.md` files.
   J-packages validates the root boundary; the product's J-skills integration
   validates the Skills themselves.
+- Observers use the same confined command, cwd, argument, and environment
+  rules as stdio MCP processes. Their IDs are selected as
+  `<package-id>/<observer-id>`.
+- Observer permissions are a non-empty exact subset of `agent.events` and
+  `model.frames`. The manifest requests an upper bound; the host sends only
+  fields covered by those permissions.
+- Installing an Observer package does not activate it. A product host must
+  explicitly select it before any run data is sent.
 
 ## Installation and update
 
@@ -133,8 +154,7 @@ j-tui --check-skills
 
 ## J-tui configuration and upgrade
 
-No migration of `~/.j/config.json` is required. After upgrading to J-tui 0.2,
-the default `~/.j/packages.json` is read at construction time. A missing
+The default `~/.j/packages.json` is read at construction time. A missing
 registry is equivalent to no installed packages.
 
 Use an alternate registry or disable all installed packages for one run:
@@ -159,18 +179,49 @@ Existing typed `extensions.mcp`, `memory`, `skills`, and `subagents`
 configuration still works. Installed package contributions are composed with
 those capabilities, and duplicate Tool or Skill names fail explicitly.
 
+Observers require an exact, typed selection:
+
+```json
+{
+  "extensions": {
+    "observers": {
+      "include": ["dev.example.agent-tools/trace"]
+    }
+  }
+}
+```
+
+The same `extensions` object may contain both `mcp` and `observers`. An empty,
+duplicate, malformed, or uninstalled Observer selection fails startup before an
+Agent is constructed.
+
+J-tui's former top-level `jspace` configuration and `--jspace-*` /
+`J_TUI_JSPACE_*` overrides are removed. J-Space users install its Observer
+package, select `dev.usej.jspace/capture`, and provide the J-Space-owned
+`JSPACE_CAPTURE_URL` and `JSPACE_CAPTURE_TOKEN` environment values. No
+J-Space-specific transport or credential remains in J-tui.
+
 ## Security and lifecycle
 
-A package containing MCP is executable code with the permissions of the
-product host. A package is not a sandbox.
+A package containing MCP or an Observer is executable code with the permissions
+of the product host. A package is not a sandbox.
 
-The 0.1 lifecycle is construction-only:
+The package lifecycle remains construction-time:
 
 1. validate the private registry and every pinned manifest;
 2. start package MCP processes with a bounded environment;
 3. initialize MCP, list Tools, apply exact selection, and freeze the result;
-4. give ordinary Tools and Skills roots to the product host;
-5. close MCP processes in reverse order when the product exits.
+4. give ordinary Tools, Skills roots, and unresolved Observer choices to the
+   product host;
+5. resolve only the Observers explicitly selected by product configuration;
+6. close MCP processes in reverse order when the product exits.
+
+J-tui invokes each selected Observer once per completed run with one
+`j.observer.run.v0.1` JSON value on stdin. The input is bounded to 8 MiB and the
+process to 15 seconds. Observer stdout is ignored and stderr is bounded.
+Observer failure is reported diagnostically but never changes the Agent result.
+The complete product-owned contract is documented in
+[J-tui Completed-run Observer Protocol 0.1](../J-tui/docs/observers.md).
 
 There is no hot reload or runtime mutation. Update or installation affects the
 next product process.
@@ -179,20 +230,23 @@ next product process.
 
 - **Open scope:** manifest, CLI behavior, registry schema, and the small Go host
   API are repository-public and experimental.
-- **Stable standards reused:** MCP stdio and Agent Skills. J does not wrap them
-  in another subprocess protocol.
+- **Stable standards reused:** MCP stdio and Agent Skills.
+- **Experimental mechanism:** `j.observer.run.v0.1` is a narrow J-tui process
+  protocol validated first by J-space; it is not a J-agent protocol.
 - **Private policy:** J-tui ordering, collision presentation, model prompt,
   approval, and UI remain product-owned.
-- **Stability:** `j.package.v0.1` is experimental. A future stable version must
-  be earned by independently maintained packages and hosts.
+- **Stability:** both package schemas and the Observer protocol remain
+  experimental. A future stable Observer contract must be earned by a second
+  independent observer.
 
 ## Deliberately not exposed
 
-Version 0.1 does not provide:
+Version 0.2 does not provide:
 
 - a J-agent `Plugin`, `Extension`, `Memory`, or package interface;
-- lifecycle Hooks, message interception, hidden prompt injection, transcript
-  access, model replacement, provider registration, or runtime mutation;
+- mutable lifecycle Hooks, message interception, hidden prompt injection,
+  transcript mutation, model replacement, provider registration, or runtime
+  mutation;
 - TUI commands, key bindings, panels, renderers, or themes;
 - an arbitrary `map[string]any` configuration bag;
 - dynamic libraries, Go `.so` plugins, in-process third-party code, npm/Python

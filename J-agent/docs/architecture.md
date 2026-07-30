@@ -145,10 +145,10 @@ implementations reveal a stable mechanism.
 ## Relationship to J
 
 J-agent is an independently usable runtime kernel inside the J repository.
-Its sibling projects J-tui and J-mem demonstrate a default customization; they
-do not become mandatory runtime layers, and their planned existence does not
-justify interfaces before real integration work exposes an independent
-variation axis.
+Its sibling projects, including J-tui, J-mem, and J-space, demonstrate
+customization through the same public seams. They do not become mandatory
+runtime layers, and their existence does not justify interfaces before real
+integration work exposes an independent variation axis.
 
 J-tui and J-mem should initially consume the same experimental public seams as
 third-party embedders. A seam may be revised while experimental, and should
@@ -157,10 +157,12 @@ consumer validate the same semantics.
 
 ## J-Space boundary
 
-J-Space research evaluates models and harness recipes; it does not change the
-runtime domain model. The official Jacobian-lens implementation requires access
-to model weights and intermediate activations, so it cannot be inferred from a
-normal hosted-model API response.
+The top-level J-space sibling evaluates models and harness recipes; it does not
+change the runtime domain model. A product host may capture frames by wrapping
+the public `Model` seam and project lifecycle metadata from `EventHandler`.
+The official Jacobian-lens implementation still requires access to model weights
+and intermediate activations, so it cannot be inferred from a normal
+hosted-model API response.
 
 Research may recommend a default harness recipe only after:
 

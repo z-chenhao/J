@@ -1007,8 +1007,6 @@ func isolateConfig(t *testing.T) string {
 		"J_TUI_REASONING_FIELD",
 		"J_TUI_REASONING_EFFORT",
 		"J_TUI_SESSION",
-		"J_TUI_JSPACE_URL",
-		"J_TUI_JSPACE_TOKEN",
 		"J_TUI_PACKAGES_REGISTRY",
 	} {
 		t.Setenv(name, "")

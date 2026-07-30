@@ -93,42 +93,52 @@ project-operated model host. Do not send secrets or private data. Replace its
 `baseURL` with your own OpenAI-compatible endpoint whenever you need a private
 or reliable deployment.
 
-### Automatic J-Space observation
+### Package Observers and J-Space
 
-J-tui can explicitly send one completed root Agent run to the J-Space replay
-service that owns the local Qwen checkpoint and fitted lens. This lets a J-tui
-running on another computer create an observation without installing MLX,
-model weights, or the lens on that computer.
+J-tui has no J-Space-specific integration. It can explicitly invoke selected
+read-only Observer contributions installed through J Packages. The top-level
+J-Space module provides the first Observer; it submits one completed root Agent
+run to the replay service that owns the local Qwen checkpoint and fitted lens.
 
-Add the experimental capture sink to `~/.j/config.json`:
+Install the `jspace-observer` binary and register the J-Space package, then
+select its exact contribution in `~/.j/config.json`:
+
+```bash
+curl --proto '=https' --tlsv1.2 --fail --location \
+  https://raw.githubusercontent.com/z-chenhao/J/main/J-space/install.sh | sh
+```
 
 ```json
 {
-  "jspace": {
-    "url": "https://usej-model.tailb0426d.ts.net/jspace/api/captures",
-    "captureToken": "${JSPACE_CAPTURE_TOKEN}"
+  "extensions": {
+    "observers": {
+      "include": ["dev.usej.jspace/capture"]
+    }
   }
 }
 ```
 
-Then export the separate capture credential before starting J-tui:
+The package manifest explicitly requests `agent.events` and `model.frames`.
+Installing the package alone sends nothing; the exact `include` entry is the
+separate permission grant.
+
+J-Space owns its endpoint, credential, durable outbox, and retry policy. Export
+its environment before starting J-tui:
 
 ```bash
+export JSPACE_CAPTURE_URL="https://usej-model.tailb0426d.ts.net/jspace/api/captures"
 export JSPACE_CAPTURE_TOKEN="..."
 j-tui
 ```
 
-The same settings are available as `J_TUI_JSPACE_URL` and
-`J_TUI_JSPACE_TOKEN`, or as `--jspace-url` and `--jspace-token`. Capture is off
-unless both values are configured. Viewer credentials cannot submit captures.
-
 Completed model frames and safe lifecycle metadata are sent over HTTPS. If
-delivery fails, J-tui writes the capture mode-0600 under
-`~/.j/jspace-outbox/` and retries queued captures on the next run. The receiving
-service keeps raw frames only in its private inbox until replay finishes; the
-published artifact does not retain the transcript. J-lens turns currently
-cover root-model frames, while the Agent timeline may also include subagent
-events.
+delivery fails, the J-Space Observer writes the capture mode-0600 under
+`~/.j/jspace-outbox/` and retries queued captures on the next observed run.
+Observer failure is diagnostic and never changes the authoritative Agent
+result. The receiving service keeps raw frames only in its private inbox until
+replay finishes; the published artifact does not retain the transcript. J-lens
+turns currently cover root-model frames, while the Agent timeline may also
+include subagent events.
 
 Check the installed release with:
 
@@ -209,13 +219,24 @@ Use `j package update [id]`, `j package remove <id>`, and `j package list` for
 the remaining lifecycle. Package-required environment values must be exported
 before J-tui starts. Use `--no-packages` for one package-free run or
 `--packages-registry <path>` / `J_TUI_PACKAGES_REGISTRY` to inspect another
-registry. No change to `~/.j/config.json` is required when upgrading.
+registry. Existing MCP and Skills package configuration needs no migration.
 
-J Package 0.1 supports only package-owned stdio MCP servers and Agent Skills
-roots. Installation is an explicit executable-code trust decision; it is not a
-sandbox. J-tui freezes package Tools at construction time and fails on
-duplicate Tool or Skill names. See the
+The exception is the retired, product-specific top-level `jspace` section from
+J-tui 0.2. Remove that section and the old `--jspace-*` /
+`J_TUI_JSPACE_*` settings, install the J-Space package, select
+`dev.usej.jspace/capture` under `extensions.observers`, and export
+`JSPACE_CAPTURE_URL` plus `JSPACE_CAPTURE_TOKEN`. This is an intentional
+migration: J-tui no longer owns J-Space transport or credentials.
+
+J Package 0.1 remains supported for package-owned stdio MCP servers and Agent
+Skills roots. Package 0.2 additionally supports explicitly selected read-only
+Observers. Installation is an executable-code trust decision but does not
+activate Observers; selection is a separate permission grant. J-tui freezes
+package Tools at construction time and fails on duplicate Tool or Skill names.
+See the
 [package protocol and author guide](../docs/packages.md).
+Observer authors should also read the
+[completed-run Observer protocol](docs/observers.md).
 
 J-tui can also compose optional J-mcp, J-mem, J-skills, and J-subagents
 capabilities from the same typed configuration. Presence enables a capability;

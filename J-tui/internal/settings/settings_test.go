@@ -459,7 +459,7 @@ func TestDefaultPath(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsAuthenticatedJSpaceCapture(t *testing.T) {
+func TestLoadAcceptsExplicitPackageObservers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.json")
 	writeTestFile(t, path, `{
 		"defaultProfile":"local",
@@ -470,40 +470,54 @@ func TestLoadAcceptsAuthenticatedJSpaceCapture(t *testing.T) {
 				"baseURL":"https://model.example/v1"
 			}
 		},
-		"jspace":{
-			"url":"https://model.example/jspace/api/captures",
-			"captureToken":"${JSPACE_CAPTURE_TOKEN}"
+		"extensions":{
+			"observers":{
+				"include":["dev.usej.jspace/capture"]
+			}
 		}
 	}`)
 	file, err := Load(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if file.JSpace == nil ||
-		file.JSpace.URL != "https://model.example/jspace/api/captures" ||
-		file.JSpace.CaptureToken != "${JSPACE_CAPTURE_TOKEN}" {
-		t.Fatalf("jspace=%#v", file.JSpace)
+	if file.Extensions == nil ||
+		file.Extensions.Observers == nil ||
+		len(file.Extensions.Observers.Include) != 1 ||
+		file.Extensions.Observers.Include[0] != "dev.usej.jspace/capture" {
+		t.Fatalf("extensions=%#v", file.Extensions)
 	}
 }
 
-func TestLoadRejectsInsecureJSpaceCapture(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	writeTestFile(t, path, `{
-		"defaultProfile":"local",
-		"profiles":{
-			"local":{
-				"provider":"openai",
-				"model":"qwen",
-				"baseURL":"https://model.example/v1"
+func TestLoadRejectsInvalidObserverSelection(t *testing.T) {
+	for _, selection := range []string{
+		"capture",
+		"dev.usej.jspace/",
+		"/capture",
+		"dev.usej.jspace/capture/extra",
+		"Dev.usej.jspace/capture",
+	} {
+		t.Run(selection, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.json")
+			writeTestFile(t, path, strings.ReplaceAll(`{
+				"defaultProfile":"local",
+				"profiles":{
+					"local":{
+						"provider":"openai",
+						"model":"qwen",
+						"baseURL":"https://model.example/v1"
+					}
+				},
+				"extensions":{
+					"observers":{
+						"include":["SELECTION"]
+					}
+				}
+			}`, "SELECTION", selection))
+			if _, err := Load(path); err == nil ||
+				!strings.Contains(err.Error(), "package/observer") {
+				t.Fatalf("error=%v", err)
 			}
-		},
-		"jspace":{
-			"url":"http://model.example/jspace/api/captures",
-			"captureToken":"secret"
-		}
-	}`)
-	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "HTTPS") {
-		t.Fatalf("error=%v", err)
+		})
 	}
 }
 

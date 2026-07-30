@@ -18,9 +18,9 @@ import (
 
 	"github.com/z-chenhao/J/J-agent/agent"
 	"github.com/z-chenhao/J/J-agent/provider/openai"
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/artifact"
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/replay"
 	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
+	"github.com/z-chenhao/J/J-space/internal/artifact"
+	"github.com/z-chenhao/J/J-space/internal/replay"
 )
 
 const (
@@ -368,7 +368,7 @@ func findModuleDirectory() (string, error) {
 		return "", err
 	}
 	for directory := working; ; directory = filepath.Dir(directory) {
-		candidate := filepath.Join(directory, "J-agent", "research", "jspace", "go.mod")
+		candidate := filepath.Join(directory, "J-space", "go.mod")
 		if _, err := os.Stat(candidate); err == nil {
 			return filepath.Dir(candidate), nil
 		}
