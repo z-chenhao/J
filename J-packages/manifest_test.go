@@ -119,6 +119,63 @@ func TestLoadRejectsShellAndAbsoluteCommandSurfaces(t *testing.T) {
 	}
 }
 
+func TestLoadAcceptsVersionTwoObserverPackage(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, "observer"), "#!/bin/sh\n", 0o755)
+	writeTestManifest(t, root, `{
+		"schemaVersion":"j.package.v0.2",
+		"id":"dev.usej.observe",
+		"version":"1.0.0",
+		"contributes":{"observers":[{
+			"id":"trace",
+			"command":"./observer",
+			"env":["TRACE_PATH"],
+			"permissions":["agent.events","model.frames"]
+		}]}
+	}`)
+
+	pkg, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	observer := pkg.Manifest.Contributes.Observers[0]
+	if observer.ID != "trace" || len(observer.Permissions) != 2 {
+		t.Fatalf("observer=%+v", observer)
+	}
+}
+
+func TestLoadRejectsObserverInVersionOneAndUnknownPermission(t *testing.T) {
+	tests := []struct {
+		name    string
+		schema  string
+		permit  string
+		wantErr string
+	}{
+		{"version one", "j.package.v0.1", "agent.events", "require schemaVersion"},
+		{"permission", "j.package.v0.2", "agent.mutate", "unsupported permission"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeTestFile(t, filepath.Join(root, "observer"), "#!/bin/sh\n", 0o755)
+			writeTestManifest(t, root, `{
+				"schemaVersion":"`+test.schema+`",
+				"id":"dev.usej.observe",
+				"version":"1.0.0",
+				"contributes":{"observers":[{
+					"id":"trace",
+					"command":"./observer",
+					"permissions":["`+test.permit+`"]
+				}]}
+			}`)
+			_, err := Load(root)
+			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
+				t.Fatalf("error=%v, want %q", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func writeTestManifest(t *testing.T, root, content string) {
 	t.Helper()
 	writeTestFile(t, filepath.Join(root, ManifestFilename), content+"\n", 0o600)

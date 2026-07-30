@@ -1,6 +1,7 @@
 # J-Space Workbench
 
-J-Space Workbench is J's independent local interpretability module. It aligns
+J-Space Workbench is J's independent top-level interpretability module and
+Observer package. It aligns
 J-agent lifecycle events with a Jacobian-lens replay of the exact model-turn
 token sequence, then renders the result as an interactive layer × token view.
 
@@ -107,9 +108,39 @@ enough to construct the replay input. The public artifact stores event kinds,
 timings, usage, token labels, and J-lens readouts. Pass
 `--retain-transcript` only for an explicitly private experiment.
 
-## Remote J-tui capture
+## J Package Observer
 
-An explicitly configured J-tui can submit one completed root Agent run to:
+Install the released binaries and register the package:
+
+```bash
+curl --proto '=https' --tlsv1.2 --fail --location \
+  https://raw.githubusercontent.com/z-chenhao/J/main/J-space/install.sh | sh
+```
+
+For repository development, `go install ./cmd/jspace-observer` followed by
+`j package add .` provides the same explicit local composition.
+
+```json
+{
+  "extensions": {
+    "observers": {
+      "include": ["dev.usej.jspace/capture"]
+    }
+  }
+}
+```
+
+Export the J-Space-owned delivery configuration:
+
+```bash
+export JSPACE_CAPTURE_URL="https://usej-model.tailb0426d.ts.net/jspace/api/captures"
+export JSPACE_CAPTURE_TOKEN="..."
+```
+
+Installing the package does not activate it. The explicit J-tui selection
+grants the manifest's `agent.events` and `model.frames` permissions. J-tui
+invokes the Observer with one bounded `j.observer.run.v0.1` value after a run.
+The Observer then submits a J-Space-owned `jspace.capture.v0.1` request to:
 
 ```text
 POST /jspace/api/captures
@@ -124,8 +155,9 @@ or an explicit `partial` result.
 
 Remote raw frames are deleted from the inbox after either result. They are
 never added to the public artifact. A process restart resumes private inbox
-files, and the remote J-tui retains failed deliveries in its own mode-0600
-outbox for retry.
+files, and the J-Space Observer retains retryable failed deliveries in its own
+mode-0600 outbox. Observer failure never changes the authoritative J-agent
+result.
 
 ## Public read-only viewer
 

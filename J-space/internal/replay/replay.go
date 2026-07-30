@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/z-chenhao/J/J-agent/agent"
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/artifact"
+	"github.com/z-chenhao/J/J-space/internal/artifact"
 )
 
 type Frame struct {

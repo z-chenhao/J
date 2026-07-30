@@ -1,0 +1,74 @@
+name: Release J-Space
+
+on:
+  push:
+    tags:
+      - J-space/v*
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: 1.26.x
+          check-latest: true
+          cache: false
+      - name: Validate tag
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#J-space/v}"
+          if [[ -z "$version" || "$version" == "$GITHUB_REF_NAME" ]]; then
+            echo "tag must match J-space/v<version>" >&2
+            exit 1
+          fi
+      - name: Test standalone module
+        working-directory: J-space
+        env:
+          GOWORK: "off"
+        run: go test ./...
+      - name: Build release archives
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#J-space/v}"
+          mkdir -p dist
+          for operating_system in darwin linux; do
+            for architecture in amd64 arm64; do
+              output_dir="dist/j-space_${operating_system}_${architecture}"
+              mkdir -p "$output_dir"
+              for command in observer server record gateway; do
+                (
+                  cd J-space
+                  GOWORK=off CGO_ENABLED=0 \
+                    GOOS="$operating_system" GOARCH="$architecture" \
+                    go build -trimpath -ldflags="-s -w" \
+                    -o "../${output_dir}/jspace-${command}" "./cmd/jspace-${command}"
+                )
+              done
+              cp J-space/j-package.json "$output_dir/j-package.json"
+              tar -C "$output_dir" -czf "${output_dir}.tar.gz" \
+                jspace-observer jspace-server jspace-record jspace-gateway \
+                j-package.json
+              rm -r "$output_dir"
+            done
+          done
+          (
+            cd dist
+            sha256sum *.tar.gz > j-space-checksums.txt
+          )
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#J-space/v}"
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --verify-tag \
+            --title "J-Space ${version}" \
+            --generate-notes

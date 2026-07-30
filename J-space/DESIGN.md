@@ -2,11 +2,12 @@
 
 ## Decision summary
 
-Build J-space as an experimental sibling research workbench under
-`J-agent/research/`, not as a J-agent runtime feature. Compose the existing
-public `Model`, `Tool`, and `EventHandler` seams, replay exact completed model
-turns through an instrumented local checkpoint, and publish only a token-gated
-read-only projection through the existing Funnel.
+Build J-space as an experimental top-level sibling Observer package and
+research workbench, not as a J-agent runtime feature. Compose the existing
+public `Model`, `Tool`, and `EventHandler` seams through J-tui's permissioned
+completed-run Observer host, replay exact model turns through an instrumented
+local checkpoint, and publish only a token-gated read-only projection through
+the existing Funnel.
 
 ## Concrete evidence and constraints
 
@@ -55,7 +56,8 @@ Current policy and defaults:
 - Audience: repository users and external researchers who can run the same
   open-weight checkpoint.
 - Shared contract: experimental `jspace.trace.v0.1` JSON artifacts and the
-  read-only HTTP projection.
+  read-only HTTP projection; `j.observer.run.v0.1` is the separate experimental
+  product-host input.
 - Private implementation: MLX layer traversal, PyTorch checkpoint decoding,
   local secret loading, process orchestration, and deployment lifecycle.
 - Stability: experimental.
@@ -84,8 +86,9 @@ Speculative complexity removed:
 
 ```text
 J-agent run
-  -> research Model wrapper captures exact request/response frames
-  -> safe event projection is written immediately
+  -> J-tui's generic Observer wrapper captures authorized frames and events
+  -> selected J-space process receives one bounded completed-run projection
+  -> J-space owns HTTPS delivery, durable retry, and capture credentials
   -> local MLX probe replays each completed frame
   -> matching J_l transports residuals into the final-layer basis
   -> top token readouts enrich jspace.trace.v0.1
@@ -114,7 +117,8 @@ checkpoint or lens to that computer.
 
 Invariant mechanism:
 
-- J-tui captures its root model request/response frames and lifecycle events.
+- J-tui generically projects authorized root model frames and lifecycle events
+  to explicitly selected package Observers.
 - an authenticated, bounded experimental request durably hands one completed
   run to the home J-Space inbox;
 - one local worker replays the frames and writes the existing artifact schema;
@@ -129,12 +133,12 @@ Current policy:
 - one worker serializes replay to protect local model memory;
 - only the validated Qwen profile is accepted.
 
-The experimental `jspace.capture.v0.1` request is shared only between J-tui and
-this research module. It is not a J-agent contract and is not generalized into
-telemetry, tracing, arbitrary artifact upload, or a provider-wide hook. Root
-model frames are measured; subagent lifecycle events may be displayed, but
-subagent model frames are deliberately not combined across potentially
-different checkpoints.
+The experimental `j.observer.run.v0.1` input belongs to the J-tui product host
+and is read-only. J-space privately adapts it to `jspace.capture.v0.1`; J-tui no
+longer owns a J-Space URL, token, outbox, retry policy, or protocol type. Neither
+schema is a J-agent contract or a provider-wide hook. Root model frames are
+measured; subagent lifecycle events may be displayed, but subagent model frames
+are deliberately not combined across potentially different checkpoints.
 
 Rejected alternatives:
 

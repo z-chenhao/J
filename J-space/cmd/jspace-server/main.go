@@ -17,9 +17,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/artifact"
-	jspaceauth "github.com/z-chenhao/J/J-agent/research/jspace/internal/auth"
-	jspaceweb "github.com/z-chenhao/J/J-agent/research/jspace/web"
+	"github.com/z-chenhao/J/J-space/internal/artifact"
+	jspaceauth "github.com/z-chenhao/J/J-space/internal/auth"
+	jspaceweb "github.com/z-chenhao/J/J-space/web"
 )
 
 const basePath = "/jspace"

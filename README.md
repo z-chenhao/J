@@ -11,9 +11,10 @@ The repository currently contains:
 | [`J-tui`](J-tui/) | Minimal terminal interface and JSON event trace | Implemented, experimental |
 | [`J-mcp`](J-mcp/) | MCP server tools projected into J-agent | Implemented, experimental |
 | [`J-mem`](J-mem/) | SQLite transcripts and JSONL long-term memory | Implemented, experimental |
-| [`J-packages`](J-packages/) | Explicit MCP and Agent Skills package installation | Implemented, experimental |
+| [`J-packages`](J-packages/) | Explicit MCP, Agent Skills, and read-only Observer package installation | Implemented, experimental |
 | [`J-skills`](J-skills/) | Standard Agent Skills discovery and progressive loading | Implemented, experimental |
 | [`J-subagents`](J-subagents/) | Isolated, optionally resumable foreground subagents exposed as one Tool | Implemented, experimental |
+| [`J-space`](J-space/) | Optional Jacobian-lens Observer package and workbench | Implemented, experimental |
 
 J-agent remains independently embeddable. Every sibling is a first-party
 example of customization, not a privileged runtime layer. Each can be replaced
@@ -52,7 +53,8 @@ complete configuration and security boundary.
 
 The same typed file can explicitly configure stdio or HTTP MCP servers,
 J-mem state, Agent Skills roots, and isolated foreground subagents. Users can
-also explicitly install reusable MCP and Agent Skills packages:
+also explicitly install reusable MCP, Agent Skills, and read-only Observer
+packages:
 
 ```bash
 export J_MEMORY_PATH="$HOME/.j/hermes-memory.jsonl"
@@ -77,7 +79,7 @@ decisions, module ownership, and deliberately deferred abstractions are
 maintained in one place:
 
 - [J design and engineering decisions](docs/design.md)
-- [J Package Protocol 0.1](docs/packages.md)
+- [J Package Protocol 0.2](docs/packages.md)
 
 Component-specific protocol details remain next to the component that owns
 them, for example [`J-agent/docs`](J-agent/docs/).

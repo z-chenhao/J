@@ -16,8 +16,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/artifact"
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/replay"
+	"github.com/z-chenhao/J/J-space/internal/artifact"
+	"github.com/z-chenhao/J/J-space/internal/replay"
 )
 
 const SchemaVersion = "jspace.capture.v0.1"

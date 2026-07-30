@@ -4,7 +4,7 @@ toolchain go1.26.5
 
 use (
 	./J-agent
-	./J-agent/research/jspace
+	./J-space
 	./J-mcp
 	./J-mem
 	./J-packages
@@ -13,4 +13,4 @@ use (
 	./J-tui
 )
 
-replace github.com/z-chenhao/J/J-packages v0.1.0 => ./J-packages
+replace github.com/z-chenhao/J/J-packages v0.2.0 => ./J-packages

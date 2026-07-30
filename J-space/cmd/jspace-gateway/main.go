@@ -18,10 +18,10 @@ import (
 	"sync"
 	"time"
 
-	jspaceauth "github.com/z-chenhao/J/J-agent/research/jspace/internal/auth"
-	jspacecapture "github.com/z-chenhao/J/J-agent/research/jspace/internal/capture"
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/replay"
-	jspaceprobe "github.com/z-chenhao/J/J-agent/research/jspace/probe"
+	jspaceauth "github.com/z-chenhao/J/J-space/internal/auth"
+	jspacecapture "github.com/z-chenhao/J/J-space/internal/capture"
+	"github.com/z-chenhao/J/J-space/internal/replay"
+	jspaceprobe "github.com/z-chenhao/J/J-space/probe"
 )
 
 const (

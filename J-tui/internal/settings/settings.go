@@ -10,10 +10,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const maxFileSize = 1 << 20
+
+var observerNamePattern = regexp.MustCompile(
+	`^[a-z0-9]+(?:[.-][a-z0-9]+)*/[a-z0-9]+(?:[.-][a-z0-9]+)*$`,
+)
 
 // File is J-tui's experimental configuration file.
 type File struct {
@@ -23,7 +28,6 @@ type File struct {
 	Memory         *Memory            `json:"memory,omitempty"`
 	Skills         *Skills            `json:"skills,omitempty"`
 	Subagents      *Subagents         `json:"subagents,omitempty"`
-	JSpace         *JSpace            `json:"jspace,omitempty"`
 }
 
 // Profile describes one concrete model connection.
@@ -40,7 +44,14 @@ type Profile struct {
 
 // Extensions contains J-tui's typed construction-time extension recipes.
 type Extensions struct {
-	MCP *MCP `json:"mcp,omitempty"`
+	MCP       *MCP       `json:"mcp,omitempty"`
+	Observers *Observers `json:"observers,omitempty"`
+}
+
+// Observers selects exact installed J Package observer contributions. Installing
+// a package alone never grants it Agent events or model frames.
+type Observers struct {
+	Include []string `json:"include"`
 }
 
 // MCP describes the explicitly configured MCP servers.
@@ -91,13 +102,6 @@ type Subagent struct {
 	Profile      string   `json:"profile,omitempty"`
 	SystemPrompt string   `json:"systemPrompt,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
-}
-
-// JSpace configures the experimental authenticated capture sink. Model frames
-// are queued locally with mode 0600 until the home J-Space service accepts them.
-type JSpace struct {
-	URL          string `json:"url"`
-	CaptureToken string `json:"captureToken"`
 }
 
 // DefaultPath returns J-tui's user-scoped configuration path.
@@ -273,38 +277,6 @@ func (file File) validate() error {
 	if err := file.Subagents.validate(file.Profiles); err != nil {
 		return err
 	}
-	if err := file.JSpace.validate(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (jspace *JSpace) validate() error {
-	if jspace == nil {
-		return nil
-	}
-	jspace.URL = strings.TrimSpace(jspace.URL)
-	if jspace.URL == "" {
-		return errors.New("jspace.url is required")
-	}
-	target, err := url.Parse(jspace.URL)
-	if err != nil || target.Host == "" || target.User != nil ||
-		target.RawQuery != "" || target.Fragment != "" {
-		return errors.New("jspace.url must be an absolute URL without credentials, query, or fragment")
-	}
-	loopback := target.Hostname() == "127.0.0.1" ||
-		strings.EqualFold(target.Hostname(), "localhost") ||
-		target.Hostname() == "::1"
-	if !strings.EqualFold(target.Scheme, "https") &&
-		!(strings.EqualFold(target.Scheme, "http") && loopback) {
-		return errors.New("jspace.url must use HTTPS, except for loopback HTTP")
-	}
-	if err := ValidateValue(jspace.CaptureToken); err != nil {
-		return fmt.Errorf("jspace.captureToken: %w", err)
-	}
-	if strings.TrimSpace(jspace.CaptureToken) == "" {
-		return errors.New("jspace.captureToken is required")
-	}
 	return nil
 }
 
@@ -312,8 +284,29 @@ func (extensions *Extensions) validate() error {
 	if extensions == nil {
 		return nil
 	}
+	if extensions.MCP == nil && extensions.Observers == nil {
+		return errors.New("extensions must configure mcp or observers")
+	}
+	if extensions.Observers != nil {
+		if len(extensions.Observers.Include) == 0 {
+			return errors.New("extensions.observers.include must be non-empty")
+		}
+		seen := make(map[string]struct{}, len(extensions.Observers.Include))
+		for index, name := range extensions.Observers.Include {
+			if name != strings.TrimSpace(name) || !observerNamePattern.MatchString(name) {
+				return fmt.Errorf(
+					"extensions.observers.include[%d] must be a trimmed package/observer name",
+					index,
+				)
+			}
+			if _, duplicate := seen[name]; duplicate {
+				return fmt.Errorf("observer %q is selected more than once", name)
+			}
+			seen[name] = struct{}{}
+		}
+	}
 	if extensions.MCP == nil {
-		return errors.New("extensions must configure mcp")
+		return nil
 	}
 	if len(extensions.MCP.Servers) == 0 {
 		return errors.New("extensions.mcp must configure at least one server")

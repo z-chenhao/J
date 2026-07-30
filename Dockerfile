@@ -4,7 +4,7 @@ WORKDIR /src
 
 COPY go.work ./
 COPY J-agent/go.mod J-agent/go.mod
-COPY J-agent/research/jspace/go.mod J-agent/research/jspace/go.mod
+COPY J-space/go.mod J-space/go.mod
 COPY J-mcp/go.mod J-mcp/go.sum J-mcp/
 COPY J-mem/go.mod J-mem/go.sum J-mem/
 COPY J-packages/go.mod J-packages/go.sum J-packages/

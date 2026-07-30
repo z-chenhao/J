@@ -252,7 +252,6 @@ internal/runtime/   private queue and JSONL transport
 provider/openai/    experimental OpenAI Chat Completions provider
 tool/bash/          experimental first-party Bash Tool
 docs/               architecture and protocol contracts
-research/           external model and harness research
 ```
 
 ## Security

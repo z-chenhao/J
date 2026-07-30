@@ -12,10 +12,10 @@ import (
 	"testing"
 
 	"github.com/z-chenhao/J/J-agent/agent"
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/artifact"
-	jspaceauth "github.com/z-chenhao/J/J-agent/research/jspace/internal/auth"
-	jspacecapture "github.com/z-chenhao/J/J-agent/research/jspace/internal/capture"
-	"github.com/z-chenhao/J/J-agent/research/jspace/internal/replay"
+	"github.com/z-chenhao/J/J-space/internal/artifact"
+	jspaceauth "github.com/z-chenhao/J/J-space/internal/auth"
+	jspacecapture "github.com/z-chenhao/J/J-space/internal/capture"
+	"github.com/z-chenhao/J/J-space/internal/replay"
 )
 
 func TestClassifyKeepsPublicSurfaceNarrow(t *testing.T) {

@@ -22,7 +22,7 @@ capability.
 
 ## Install or update
 
-From `J-agent/research/jspace`:
+From `J-space`:
 
 ```bash
 make check
