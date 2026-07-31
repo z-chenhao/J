@@ -14,8 +14,8 @@ github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zI
 github.com/yosida95/uritemplate/v3 v3.0.2/go.mod h1:ILOh0sOhIJR3+L/8afwt/kE++YT040gmv5BQTMR2HP4=
 github.com/z-chenhao/J/J-agent v0.0.0-20260727045356-5813cc6f3af4 h1:lI4yUQ9lWHfc8InZ69m/qh3ghW0BKbRwlTuk9cGj8ac=
 github.com/z-chenhao/J/J-agent v0.0.0-20260727045356-5813cc6f3af4/go.mod h1:NwQs8C/lh8GHr3TMoLDFtSZg3LIUdZm2c4L3Hb2AO/g=
-github.com/z-chenhao/J/J-mcp v0.0.1 h1:05apgDNfaKaCrjR6u+hH7JwTG5kMVryUh04ME2IJfRE=
-github.com/z-chenhao/J/J-mcp v0.0.1/go.mod h1:UMGcAou0hWJzg5+fmNPgh+ZshLygurStpFaGDj8Kg/M=
+github.com/z-chenhao/J/J-mcp v0.0.2 h1:4+nY42vdwHQx9xVlHnos2MIFOz9s4L5xNSC4HqRZXkw=
+github.com/z-chenhao/J/J-mcp v0.0.2/go.mod h1:mQ+nqNcREzehoQLCGOkqPgWG7ipVgALVh1Jij1TfFPk=
 golang.org/x/oauth2 v0.35.0 h1:Mv2mzuHuZuY2+bkyWXIHMfhNdJAdwW3FuWeCPYN5GVQ=
 golang.org/x/oauth2 v0.35.0/go.mod h1:lzm5WQJQwKZ3nwavOZ3IS5Aulzxi68dUSgRHujetwEA=
 golang.org/x/sync v0.20.0 h1:e0PTpb7pjO8GAtTs2dQ6jYa5BWYlMuX047Dco/pItO4=

@@ -7,7 +7,7 @@ toolchain go1.26.5
 require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/z-chenhao/J/J-agent v0.0.0-20260727045356-5813cc6f3af4
-	github.com/z-chenhao/J/J-mcp v0.0.1
+	github.com/z-chenhao/J/J-mcp v0.0.2
 )
 
 require (
