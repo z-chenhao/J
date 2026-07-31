@@ -722,9 +722,11 @@ func TestComposeRuntimeReportsMCPInitializationStderr(t *testing.T) {
 	})
 	if err == nil ||
 		!strings.Contains(err.Error(), `start MCP server "failure"`) ||
-		!strings.Contains(err.Error(), "calling \"initialize\": EOF") ||
+		!strings.Contains(err.Error(), "calling \"initialize\"") ||
+		!strings.Contains(err.Error(), "EOF") ||
 		!strings.Contains(err.Error(), "configured filesystem root is not accessible") ||
-		strings.Contains(err.Error(), "\x1b") {
+		strings.Contains(err.Error(), "\x1b") ||
+		strings.Contains(err.Error(), "[31m") {
 		t.Fatalf("error=%v", err)
 	}
 }

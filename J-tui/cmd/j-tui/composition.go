@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/charmbracelet/x/ansi"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/z-chenhao/J/J-agent/agent"
 	bashtool "github.com/z-chenhao/J/J-agent/tool/bash"
@@ -121,7 +122,7 @@ func (capture *mcpStartupStderr) stop() string {
 	capture.mu.Lock()
 	defer capture.mu.Unlock()
 	capture.active = false
-	details := strings.TrimSpace(string(capture.content))
+	details := strings.TrimSpace(ansi.Strip(string(capture.content)))
 	capture.content = nil
 	details = strings.Map(func(character rune) rune {
 		if character == '\n' || character == '\t' || !unicode.IsControl(character) {
