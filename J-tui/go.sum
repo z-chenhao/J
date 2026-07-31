@@ -99,8 +99,8 @@ github.com/z-chenhao/J/J-mem v0.0.2 h1:wLKfZ1IeYr0RRXu8obLuc/roa8guwNhGcXVtIB1gz
 github.com/z-chenhao/J/J-mem v0.0.2/go.mod h1:ym75O1fvpPzksETPboTIbmPAAk/3i1ng+fT6t5CZpFU=
 github.com/z-chenhao/J/J-packages v0.3.0 h1:1eXGg5qfoVL09R8YQVluf2Z15jw+nDc+yFBduMozREM=
 github.com/z-chenhao/J/J-packages v0.3.0/go.mod h1:N2hY/8LqmHcB0/b5QlYJJzmeRbOJ4gAiDKMMcaNSR1M=
-github.com/z-chenhao/J/J-skills v0.0.2 h1:xKgxQSyIwXdIsga2cAnOyBh9jt5MZ9CRK2rAiRwGOT4=
-github.com/z-chenhao/J/J-skills v0.0.2/go.mod h1:EsCGzGuaf7qyPCh4SxTaSBSjQq+Ij+jYGGPf5Q1Qz6s=
+github.com/z-chenhao/J/J-skills v0.0.3 h1:qOnjUU/okVTdGsJTeLplRPt4INsvVUwAenZ92gJY08A=
+github.com/z-chenhao/J/J-skills v0.0.3/go.mod h1:EsCGzGuaf7qyPCh4SxTaSBSjQq+Ij+jYGGPf5Q1Qz6s=
 github.com/z-chenhao/J/J-subagents v0.0.2 h1:XLrjWWyUtUgPFNVdF9vsCk0OdqJC3VaQSWpq35RxvkQ=
 github.com/z-chenhao/J/J-subagents v0.0.2/go.mod h1:kbAKrSTdNbUlqOoh4PSZJ2zjlkAVTHA0+zIGoa4C6Oc=
 golang.org/x/exp v0.0.0-20231006140011-7918f672742d h1:jtJma62tbqLibJ5sFQz8bKtEM8rJBtfilJ2qTU199MI=
