@@ -29,8 +29,12 @@ runner, err := agent.New(model, agent.WithTools(skillTool))
 The package follows the [Agent Skills
 specification](https://agentskills.io/specification), including the
 `SKILL.md` filename, YAML frontmatter, naming constraints, and progressive
-disclosure. It also replaces the common `{baseDir}` placeholder when a resource
-is read for compatibility with existing Pi skills.
+disclosure. Description text is normalized at the loading boundary so valid
+YAML folded and block scalars do not fail because their parser representation
+contains surrounding whitespace; the normalized description must still be
+non-empty and at most 1,024 characters. The loader also replaces the common
+`{baseDir}` placeholder when a resource is read for compatibility with existing
+Pi skills.
 
 J-skills deliberately does not install packages, auto-search user or project
 directories, execute scripts, interpret `allowed-tools`, or define trust

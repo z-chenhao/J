@@ -222,7 +222,8 @@ func loadSkill(directory, path string) (Skill, error) {
 	if err != nil {
 		return Skill{}, fmt.Errorf("parse skill %q: %w", path, err)
 	}
-	if err := validateSkillMetadata(frontmatter.Name, frontmatter.Description); err != nil {
+	description := strings.TrimSpace(frontmatter.Description)
+	if err := validateSkillMetadata(frontmatter.Name, description); err != nil {
 		return Skill{}, fmt.Errorf("validate skill %q: %w", path, err)
 	}
 	if filepath.Base(directory) != frontmatter.Name {
@@ -235,7 +236,7 @@ func loadSkill(directory, path string) (Skill, error) {
 	}
 	return Skill{
 		Name:        frontmatter.Name,
-		Description: frontmatter.Description,
+		Description: description,
 		Directory:   filepath.Clean(directory),
 	}, nil
 }
@@ -283,9 +284,11 @@ func validateSkillMetadata(name, description string) error {
 		}
 		return errors.New("name may contain only lowercase ASCII letters, digits, and hyphens")
 	}
-	if description == "" || description != strings.TrimSpace(description) ||
-		utf8.RuneCountInString(description) > 1024 {
-		return errors.New("description must contain 1 to 1024 trimmed characters")
+	if description == "" {
+		return errors.New("description must contain at least one non-whitespace character")
+	}
+	if utf8.RuneCountInString(description) > 1024 {
+		return errors.New("description exceeds 1024 characters")
 	}
 	return nil
 }

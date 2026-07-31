@@ -80,6 +80,51 @@ func TestLoadValidatesAgentSkillsStandard(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesDescriptionWhitespace(t *testing.T) {
+	root := t.TempDir()
+	writeFile(
+		t,
+		filepath.Join(root, "alpha", skillFileName),
+		"---\nname: alpha\ndescription: >\n  Use for alpha work.\n  Read this when alpha is requested.\n---\n# Alpha\n",
+	)
+
+	catalog, err := Load(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := catalog.Skills()
+	if len(found) != 1 ||
+		found[0].Description != "Use for alpha work. Read this when alpha is requested." {
+		t.Fatalf("skills=%#v", found)
+	}
+	tool, err := catalog.Tool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if description := tool.Spec().Description; strings.Contains(description, "requested.\n\n") {
+		t.Fatalf("tool description retained surrounding whitespace: %q", description)
+	}
+}
+
+func TestLoadReportsDescriptionFailuresClearly(t *testing.T) {
+	tests := map[string]struct {
+		description string
+		want        string
+	}{
+		"blank":    {`"  "`, "at least one non-whitespace character"},
+		"too long": {strings.Repeat("x", 1025), "exceeds 1024 characters"},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			writeSkill(t, root, "alpha", test.description, "# Alpha")
+			if _, err := Load(root); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
 func TestLoadRejectsDuplicateNames(t *testing.T) {
 	first := t.TempDir()
 	second := t.TempDir()
