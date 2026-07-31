@@ -14,7 +14,7 @@ require (
 	github.com/z-chenhao/J/J-agent v0.0.0-20260727045356-5813cc6f3af4
 	github.com/z-chenhao/J/J-mcp v0.0.1
 	github.com/z-chenhao/J/J-mem v0.0.2
-	github.com/z-chenhao/J/J-packages v0.2.0
+	github.com/z-chenhao/J/J-packages v0.3.0
 	github.com/z-chenhao/J/J-skills v0.0.2
 	github.com/z-chenhao/J/J-subagents v0.0.2
 )

@@ -97,8 +97,8 @@ github.com/z-chenhao/J/J-mcp v0.0.1 h1:05apgDNfaKaCrjR6u+hH7JwTG5kMVryUh04ME2IJf
 github.com/z-chenhao/J/J-mcp v0.0.1/go.mod h1:UMGcAou0hWJzg5+fmNPgh+ZshLygurStpFaGDj8Kg/M=
 github.com/z-chenhao/J/J-mem v0.0.2 h1:wLKfZ1IeYr0RRXu8obLuc/roa8guwNhGcXVtIB1gz3g=
 github.com/z-chenhao/J/J-mem v0.0.2/go.mod h1:ym75O1fvpPzksETPboTIbmPAAk/3i1ng+fT6t5CZpFU=
-github.com/z-chenhao/J/J-packages v0.2.0 h1:ZAorlvZsYEYa4Z5ISrhiqBAAOuM4gFNsSVDtsS1m3r8=
-github.com/z-chenhao/J/J-packages v0.2.0/go.mod h1:N2hY/8LqmHcB0/b5QlYJJzmeRbOJ4gAiDKMMcaNSR1M=
+github.com/z-chenhao/J/J-packages v0.3.0 h1:1eXGg5qfoVL09R8YQVluf2Z15jw+nDc+yFBduMozREM=
+github.com/z-chenhao/J/J-packages v0.3.0/go.mod h1:N2hY/8LqmHcB0/b5QlYJJzmeRbOJ4gAiDKMMcaNSR1M=
 github.com/z-chenhao/J/J-skills v0.0.2 h1:xKgxQSyIwXdIsga2cAnOyBh9jt5MZ9CRK2rAiRwGOT4=
 github.com/z-chenhao/J/J-skills v0.0.2/go.mod h1:EsCGzGuaf7qyPCh4SxTaSBSjQq+Ij+jYGGPf5Q1Qz6s=
 github.com/z-chenhao/J/J-subagents v0.0.2 h1:XLrjWWyUtUgPFNVdF9vsCk0OdqJC3VaQSWpq35RxvkQ=

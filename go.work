@@ -13,4 +13,4 @@ use (
 	./J-tui
 )
 
-replace github.com/z-chenhao/J/J-packages v0.2.0 => ./J-packages
+replace github.com/z-chenhao/J/J-packages v0.3.0 => ./J-packages

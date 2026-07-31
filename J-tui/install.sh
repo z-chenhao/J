@@ -2,7 +2,7 @@
 set -eu
 
 repository="z-chenhao/J"
-version="${J_TUI_VERSION:-0.3.0}"
+version="${J_TUI_VERSION:-0.4.0}"
 install_dir="${J_TUI_INSTALL_DIR:-${HOME}/.local/bin}"
 release_url="https://github.com/${repository}/releases/download/J-tui/v${version}"
 
